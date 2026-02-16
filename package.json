@@ -1,0 +1,21 @@
+{
+  "name": "jardinlac-api-print-zebra",
+  "version": "1.0.0",
+  "description": "Local print service for Zebra ZC300 card printer",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "author": "dennis zyche",
+  "license": "ISC",
+  "dependencies": {
+    "body-parser": "^2.2.2",
+    "express": "^5.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}
