@@ -3,7 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const net = require('net');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -327,6 +327,163 @@ function sendToUSBPrinter(printerName, zplData) {
 }
 
 /**
+ * Run a system command without shell interpolation.
+ */
+function runCommand(command, args = []) {
+    return new Promise((resolve) => {
+        execFile(command, args, (error, stdout, stderr) => {
+            resolve({
+                success: !error,
+                command,
+                args,
+                code: error && typeof error.code !== 'undefined' ? error.code : 0,
+                stdout: String(stdout || '').trim(),
+                stderr: String(stderr || '').trim(),
+                error: error ? error.message : null
+            });
+        });
+    });
+}
+
+/**
+ * Run a PowerShell script and return structured output.
+ */
+function runPowerShell(script) {
+    const shell = os.platform() === 'win32' ? 'powershell.exe' : 'powershell';
+    return runCommand(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
+}
+
+/**
+ * Escape a string for a PowerShell single-quoted literal.
+ */
+function escapePowerShellSingleQuoted(value) {
+    return String(value || '').replace(/'/g, "''");
+}
+
+/**
+ * Attempt to recover a stuck CUPS queue for the configured printer.
+ */
+async function cleanupPrinterQueueCups(printerName) {
+    const cancelAll = await runCommand('cancel', ['-a', printerName]);
+    const disable = await runCommand('cupsdisable', [printerName]);
+    const enable = await runCommand('cupsenable', [printerName]);
+    const status = await runCommand('lpstat', ['-p', printerName]);
+
+    const combinedCancelOutput = `${cancelAll.stdout} ${cancelAll.stderr}`.toLowerCase();
+    const cancelIsNonBlocking = cancelAll.success ||
+        combinedCancelOutput.includes('not found') ||
+        combinedCancelOutput.includes('no jobs') ||
+        combinedCancelOutput.includes('unknown');
+
+    const success = cancelIsNonBlocking && disable.success && enable.success;
+
+    return {
+        success,
+        printer: printerName,
+        steps: {
+            cancelAll: {
+                ...cancelAll,
+                treatedAsSuccess: cancelIsNonBlocking
+            },
+            disable,
+            enable,
+            status
+        }
+    };
+}
+
+/**
+ * Attempt to recover a stuck Windows print queue for the configured printer.
+ */
+async function cleanupPrinterQueueWindows(printerName) {
+    const safePrinterName = escapePowerShellSingleQuoted(printerName);
+
+    const clearJobsScript = `$p='${safePrinterName}'; if (Get-Command Get-PrintJob -ErrorAction SilentlyContinue) { Get-PrintJob -PrinterName $p -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue; Write-Output 'Print jobs cleared (if any).'; } else { Write-Output 'Get-PrintJob cmdlet unavailable on this system.'; }`;
+    const restartSpoolerScript = "Restart-Service -Name Spooler -Force; Write-Output 'Spooler restarted.'";
+    const statusScript = `$p='${safePrinterName}'; if (Get-Command Get-Printer -ErrorAction SilentlyContinue) { Get-Printer -Name $p | Select-Object Name,PrinterStatus,WorkOffline,DriverName | ConvertTo-Json -Compress; } else { Write-Output 'Get-Printer cmdlet unavailable on this system.'; }`;
+
+    const clearJobs = await runPowerShell(clearJobsScript);
+    const restartSpooler = await runPowerShell(restartSpoolerScript);
+    const status = await runPowerShell(statusScript);
+
+    return {
+        success: clearJobs.success && restartSpooler.success,
+        printer: printerName,
+        steps: {
+            clearJobs,
+            restartSpooler,
+            status
+        }
+    };
+}
+
+/**
+ * Attempt to recover a stuck print queue based on current OS.
+ */
+async function cleanupPrinterQueue(printerName) {
+    if (os.platform() === 'win32') {
+        return cleanupPrinterQueueWindows(printerName);
+    }
+
+    return cleanupPrinterQueueCups(printerName);
+}
+
+/**
+ * Print a generated PDF on Windows.
+ * Strategy: SumatraPDF (if available) -> PowerShell PrintTo fallback.
+ */
+async function printPdfOnWindows(printerName, pdfFilePath) {
+    const configuredSumatraPath = String(process.env.SUMATRA_PDF_PATH || '').trim();
+    const sumatraCandidates = [
+        configuredSumatraPath,
+        'SumatraPDF.exe',
+        'sumatrapdf.exe'
+    ].filter(Boolean);
+
+    for (const candidate of sumatraCandidates) {
+        const check = await runCommand(candidate, ['-v']);
+        if (!check.success) {
+            continue;
+        }
+
+        const printResult = await runCommand(candidate, [
+            '-print-to',
+            printerName,
+            '-silent',
+            '-exit-on-print',
+            pdfFilePath
+        ]);
+
+        if (printResult.success) {
+            return {
+                success: true,
+                strategy: 'sumatra',
+                details: printResult
+            };
+        }
+    }
+
+    const safePrinterName = escapePowerShellSingleQuoted(printerName);
+    const safePdfPath = escapePowerShellSingleQuoted(pdfFilePath);
+    const printToScript = `$f='${safePdfPath}'; $p='${safePrinterName}'; $proc=Start-Process -FilePath $f -Verb PrintTo -ArgumentList ('"'+$p+'"') -PassThru; if ($proc) { Wait-Process -Id $proc.Id -Timeout 45 -ErrorAction SilentlyContinue; Write-Output 'PrintTo command triggered.'; }`;
+    const printToResult = await runPowerShell(printToScript);
+
+    if (printToResult.success) {
+        return {
+            success: true,
+            strategy: 'powershell-printto',
+            details: printToResult
+        };
+    }
+
+    return {
+        success: false,
+        strategy: 'none',
+        details: printToResult
+    };
+}
+
+/**
  * Send generated barcode image through printer driver.
  */
 function sendBarcodeImageToUSBPrinter(printerName, cardData) {
@@ -346,18 +503,47 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
             const pdfBuffer = await generateBarcodeCardPdf(safeCardNumber, photoBuffer);
             const tempFile = path.join(os.tmpdir(), `zebra_barcode_${Date.now()}.pdf`);
 
-            fs.writeFile(tempFile, pdfBuffer, (err) => {
+            fs.writeFile(tempFile, pdfBuffer, async (err) => {
                 if (err) {
                     reject(err);
                     return;
                 }
 
+                if (os.platform() === 'win32') {
+                    try {
+                        const winResult = await printPdfOnWindows(printerName, tempFile);
+                        fs.unlink(tempFile, () => {});
+
+                        if (!winResult.success) {
+                            const detailText = [
+                                winResult.details && winResult.details.stdout,
+                                winResult.details && winResult.details.stderr,
+                                winResult.details && winResult.details.error
+                            ].filter(Boolean).join(' | ');
+                            reject(new Error(`Barcode print command failed on Windows: ${detailText || 'no additional details'}`));
+                            return;
+                        }
+
+                        const output = `${winResult.details.stdout || ''}${winResult.details.stderr || ''}`.trim();
+                        console.log(`✓ Barcode image print job sent (win32, ${winResult.strategy})`);
+                        resolve({
+                            success: true,
+                            method: 'usb-barcode-win32',
+                            printStrategy: winResult.strategy,
+                            commandOutput: output,
+                            photoIncluded: Boolean(photoBuffer)
+                        });
+                        return;
+                    } catch (winErr) {
+                        fs.unlink(tempFile, () => {});
+                        reject(new Error(`Barcode print command failed on Windows: ${winErr.message}`));
+                        return;
+                    }
+                }
+
                 let cmd;
                 if (os.platform() === 'darwin' || os.platform() === 'linux') {
                     cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper "${tempFile}"`;
-                } else if (os.platform() === 'win32') {
-                    reject(new Error('PRINT_FORMAT=barcode is not implemented for win32 yet'));
-                    return;
                 } else {
                     cmd = `lp -d "${printerName}" "${tempFile}"`;
                 }
@@ -524,6 +710,38 @@ app.post('/test', async (req, res) => {
     }
 });
 
+/**
+ * Cleanup endpoint - clears pending jobs and resets spooler/queue.
+ */
+app.post('/cleanup', async (req, res) => {
+    try {
+        if (CONNECTION_TYPE !== 'usb') {
+            return res.status(400).json({
+                success: false,
+                error: 'cleanup endpoint is intended for usb queue mode'
+            });
+        }
+
+        const result = await cleanupPrinterQueue(PRINTER_NAME);
+        const statusCode = result.success ? 200 : 500;
+
+        return res.status(statusCode).json({
+            success: result.success,
+            message: result.success
+                ? 'Printer queue cleanup completed'
+                : 'Printer queue cleanup ran with errors',
+            printer: result.printer,
+            connectionType: CONNECTION_TYPE,
+            steps: result.steps
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
 
 // ============================================================================
 // START SERVER
@@ -549,6 +767,7 @@ app.listen(PORT, async () => {
     console.log(`  GET  /printers - List available printers`);
     console.log(`  POST /print    - Print card`);
     console.log(`  POST /test     - Print test card`);
+    console.log(`  POST /cleanup  - Reset printer queue/spooler`);
     console.log('');
     
     // List available printers on startup
