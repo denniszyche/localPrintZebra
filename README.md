@@ -175,3 +175,26 @@ What to do on the final Windows machine:
 3. Keep `PRINT_FORMAT=barcode` in `.env`.
 4. Restart service.
 5. Test `POST /print`, then `POST /cleanup` if the queue gets stuck.
+
+### Windows folder + auto-start
+
+Use a stable service path (recommended):
+
+- `C:\Services\localPrintZebra`
+- `C:\Apps\localPrintZebra`
+
+Avoid Desktop/Downloads/OneDrive folders.
+
+Run as a Windows Service with NSSM so it starts after reboot:
+
+```powershell
+nssm install ZebraPrintService "C:\Program Files\nodejs\node.exe" "C:\Services\localPrintZebra\app.js"
+nssm set ZebraPrintService AppDirectory "C:\Services\localPrintZebra"
+nssm set ZebraPrintService Start SERVICE_AUTO_START
+nssm start ZebraPrintService
+```
+
+Recommended machine settings:
+
+1. Allow the API port (for example `3001`) in Windows Firewall.
+2. Disable sleep/hibernation for the print machine.
