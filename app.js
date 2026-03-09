@@ -31,9 +31,15 @@ const PRINTER_PORT = process.env.PRINTER_PORT || 9100;
 // For USB printing (printer name as shown in system)
 const PRINTER_NAME = process.env.PRINTER_NAME || 'ZDesigner ZC300';
 
-// Print format: 'zpl', 'plain', or 'barcode'.
+// Print format: 'zpl' or 'barcode'.
 // 'barcode' generates a Code128 image from cardNumber and prints it via driver.
-const PRINT_FORMAT = process.env.PRINT_FORMAT || 'zpl';
+const ALLOWED_PRINT_FORMATS = new Set(['zpl', 'barcode']);
+const rawPrintFormat = String(process.env.PRINT_FORMAT || 'barcode').trim().toLowerCase();
+const PRINT_FORMAT = ALLOWED_PRINT_FORMATS.has(rawPrintFormat) ? rawPrintFormat : 'barcode';
+
+if (rawPrintFormat !== PRINT_FORMAT) {
+    console.warn(`Invalid PRINT_FORMAT="${rawPrintFormat}". Falling back to "${PRINT_FORMAT}".`);
+}
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -66,21 +72,6 @@ function generateCardZPL(cardData) {
     return zpl;
 }
 
-/**
- * Minimal ZPL for transport testing.
- * If this prints literally, the queue is not treating input as raw ZPL.
- */
-function generateHelloWorldZPL() {
-    return '^XA\n^FO50,50^A0N,40,40^FDHELLO WORLD^FS\n^XZ\n';
-}
-
-/**
- * Build a plain text card body for driver-based printing.
- */
-function generatePlainCardText(cardData) {
-    const { cardNumber } = cardData;
-    return `${cardNumber || ''}`;
-}
 
 /**
  * Generate a barcode image buffer (PNG) from the card number.
@@ -106,10 +97,51 @@ function generateBarcodePng(cardNumber) {
 }
 
 /**
+ * Decode a data URL image string to Buffer.
+ */
+function parseDataUrlImageBuffer(dataUrl) {
+    const match = String(dataUrl || '').match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/);
+    if (!match) {
+        throw new Error('Invalid data URL image format');
+    }
+    return Buffer.from(match[1], 'base64');
+}
+
+/**
+ * Fetch image bytes from URL (or data URL) for card rendering.
+ */
+async function loadPhotoBuffer(photoUrl) {
+    if (!photoUrl) {
+        return null;
+    }
+
+    if (String(photoUrl).startsWith('data:image/')) {
+        return parseDataUrlImageBuffer(photoUrl);
+    }
+
+    if (typeof fetch !== 'function') {
+        throw new Error('Global fetch is not available in this Node.js runtime');
+    }
+
+    const response = await fetch(photoUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to download photo: HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+        throw new Error(`photoUrl is not an image (content-type: ${contentType || 'unknown'})`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+}
+
+/**
  * Render a fixed-size CR80 PDF with card number on top and barcode below.
  * This avoids printer-side full-page image scaling.
  */
-async function generateBarcodeCardPdf(cardNumber) {
+async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
     const safeNumber = String(cardNumber || '').trim();
     const barcodePng = await generateBarcodePng(safeNumber);
 
@@ -132,22 +164,49 @@ async function generateBarcodeCardPdf(cardNumber) {
         doc.rect(0, 0, cardWidthPt, cardHeightPt).fill('#FFFFFF');
         doc.fillColor('#000000');
 
-        // Card number line
-        doc.font('Helvetica').fontSize(16);
-        doc.text(safeNumber, 0, 18, {
-            width: cardWidthPt,
-            align: 'center'
-        });
+        if (photoBuffer) {
+            // Left photo block when image is provided.
+            const photoX = 10;
+            const photoY = 16;
+            const photoW = 70;
+            const photoH = 95;
+            doc.image(photoBuffer, photoX, photoY, {
+                fit: [photoW, photoH],
+                align: 'center',
+                valign: 'center'
+            });
 
-        // Barcode image block below card number
-        const barcodeWidth = 180;
-        const barcodeHeight = 54;
-        const barcodeX = (cardWidthPt - barcodeWidth) / 2;
-        const barcodeY = 56;
-        doc.image(barcodePng, barcodeX, barcodeY, {
-            width: barcodeWidth,
-            height: barcodeHeight
-        });
+            // Right text + barcode block.
+            const contentX = 90;
+            const contentW = cardWidthPt - contentX - 10;
+            doc.font('Helvetica').fontSize(13);
+            doc.text(safeNumber, contentX, 20, {
+                width: contentW,
+                align: 'center'
+            });
+
+            doc.image(barcodePng, contentX + 6, 58, {
+                fit: [contentW - 12, 50],
+                align: 'center',
+                valign: 'center'
+            });
+        } else {
+            // Centered text + barcode block without photo.
+            doc.font('Helvetica').fontSize(16);
+            doc.text(safeNumber, 0, 18, {
+                width: cardWidthPt,
+                align: 'center'
+            });
+
+            const barcodeWidth = 165;
+            const barcodeHeight = 50;
+            const barcodeX = (cardWidthPt - barcodeWidth) / 2;
+            const barcodeY = 58;
+            doc.image(barcodePng, barcodeX, barcodeY, {
+                width: barcodeWidth,
+                height: barcodeHeight
+            });
+        }
 
         doc.end();
     });
@@ -268,55 +327,23 @@ function sendToUSBPrinter(printerName, zplData) {
 }
 
 /**
- * Send plain text via printer driver (non-raw path).
- * Useful for ZC300 diagnostics when raw ZPL does not render.
- */
-function sendPlainTextToUSBPrinter(printerName, text) {
-    return new Promise((resolve, reject) => {
-        const tempFile = path.join(os.tmpdir(), `zebra_text_${Date.now()}.txt`);
-
-        fs.writeFile(tempFile, `${text}\n`, (err) => {
-            if (err) {
-                reject(err);
-                return;
-            }
-
-            let cmd;
-            if (os.platform() === 'darwin' || os.platform() === 'linux') {
-                cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper "${tempFile}"`;
-            } else if (os.platform() === 'win32') {
-                cmd = `notepad /p "${tempFile}"`;
-            } else {
-                cmd = `lp -d "${printerName}" "${tempFile}"`;
-            }
-
-            exec(cmd, (error, stdout, stderr) => {
-                fs.unlink(tempFile, () => {});
-
-                if (error) {
-                    reject(new Error(`Plain print command failed: ${error.message}`));
-                    return;
-                }
-
-                const output = `${stdout || ''}${stderr || ''}`.trim();
-                const normalizedOutput = output.replace(/[–—−]/g, '-');
-                const jobMatch = normalizedOutput.match(/\b([A-Za-z0-9_\-]+-\d+)\b/);
-                const jobId = jobMatch ? jobMatch[1] : null;
-
-                console.log('✓ Plain text print job sent', jobId ? `(${jobId})` : '');
-                resolve({ success: true, method: 'usb-driver', jobId, commandOutput: output });
-            });
-        });
-    });
-}
-
-/**
  * Send generated barcode image through printer driver.
  */
-function sendBarcodeImageToUSBPrinter(printerName, cardNumber) {
+function sendBarcodeImageToUSBPrinter(printerName, cardData) {
     return new Promise(async (resolve, reject) => {
         try {
-            const pdfBuffer = await generateBarcodeCardPdf(cardNumber);
+            const safeCardNumber = String(cardData.cardNumber || '').trim();
+            let photoBuffer = null;
+
+            if (cardData.photoUrl) {
+                try {
+                    photoBuffer = await loadPhotoBuffer(cardData.photoUrl);
+                } catch (photoError) {
+                    console.warn(`⚠️  Photo could not be loaded, printing without photo: ${photoError.message}`);
+                }
+            }
+
+            const pdfBuffer = await generateBarcodeCardPdf(safeCardNumber, photoBuffer);
             const tempFile = path.join(os.tmpdir(), `zebra_barcode_${Date.now()}.pdf`);
 
             fs.writeFile(tempFile, pdfBuffer, (err) => {
@@ -349,7 +376,13 @@ function sendBarcodeImageToUSBPrinter(printerName, cardNumber) {
                     const jobId = jobMatch ? jobMatch[1] : null;
 
                     console.log('✓ Barcode image print job sent', jobId ? `(${jobId})` : '');
-                    resolve({ success: true, method: 'usb-barcode', jobId, commandOutput: output });
+                    resolve({
+                        success: true,
+                        method: 'usb-barcode',
+                        jobId,
+                        commandOutput: output,
+                        photoIncluded: Boolean(photoBuffer)
+                    });
                 });
             });
         } catch (error) {
@@ -378,18 +411,8 @@ function printCardData(cardData) {
             throw new Error('PRINT_FORMAT=barcode is only supported with CONNECTION_TYPE=usb');
         }
 
-        return sendBarcodeImageToUSBPrinter(PRINTER_NAME, cardData.cardNumber);
+        return sendBarcodeImageToUSBPrinter(PRINTER_NAME, cardData);
     }
-
-    if (PRINT_FORMAT === 'plain') {
-        if (CONNECTION_TYPE !== 'usb') {
-            throw new Error('PRINT_FORMAT=plain is only supported with CONNECTION_TYPE=usb');
-        }
-
-        const plainText = generatePlainCardText(cardData);
-        return sendPlainTextToUSBPrinter(PRINTER_NAME, plainText);
-    }
-
     const zplData = generateCardZPL(cardData);
     return sendToPrinter(zplData);
 }
@@ -451,7 +474,7 @@ app.post('/print', async (req, res) => {
             timestamp: new Date().toISOString()
         });
         
-        // Print in configured format (zpl or plain)
+        // Print in configured format (zpl or barcode)
         const result = await printCardData(cardData);
         
         res.json({
@@ -460,6 +483,7 @@ app.post('/print', async (req, res) => {
             method: result.method,
             format: PRINT_FORMAT,
             jobId: result.jobId || null,
+            photoIncluded: Boolean(result.photoIncluded),
             printer: CONNECTION_TYPE === 'network' 
                 ? `${PRINTER_IP}:${PRINTER_PORT}`
                 : PRINTER_NAME
@@ -500,60 +524,6 @@ app.post('/test', async (req, res) => {
     }
 });
 
-/**
- * Minimal transport test - prints only HELLO WORLD in ZPL.
- */
-app.post('/test-hello', async (req, res) => {
-    try {
-        const zplData = generateHelloWorldZPL();
-        const result = await sendToPrinter(zplData);
-        res.json({
-            success: true,
-            message: 'Hello World test sent to printer',
-            method: result.method,
-            zpl: zplData
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
-
-/**
- * Driver test endpoint - sends plain text through printer driver (no ZPL).
- */
-app.post('/test-plain', async (req, res) => {
-    try {
-        if (CONNECTION_TYPE !== 'usb') {
-            return res.status(400).json({
-                success: false,
-                error: 'test-plain is only available in usb connection mode'
-            });
-        }
-
-        const text = (req.body && typeof req.body.text === 'string' && req.body.text.trim())
-            ? req.body.text.trim()
-            : 'HELLO WORLD';
-
-        const result = await sendPlainTextToUSBPrinter(PRINTER_NAME, text);
-        res.json({
-            success: true,
-            message: 'Plain text test sent to printer driver',
-            method: result.method,
-            printer: PRINTER_NAME,
-            text,
-            jobId: result.jobId,
-            commandOutput: result.commandOutput
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            error: error.message
-        });
-    }
-});
 
 // ============================================================================
 // START SERVER
@@ -579,8 +549,6 @@ app.listen(PORT, async () => {
     console.log(`  GET  /printers - List available printers`);
     console.log(`  POST /print    - Print card`);
     console.log(`  POST /test     - Print test card`);
-    console.log(`  POST /test-hello - Print minimal HELLO WORLD ZPL`);
-    console.log(`  POST /test-plain - Print plain text through driver`);
     console.log('');
     
     // List available printers on startup
