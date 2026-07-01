@@ -1,14 +1,14 @@
-require('dotenv').config();
-const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const net = require('net');
-const { exec, execFile } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const bwipjs = require('bwip-js');
-const PDFDocument = require('pdfkit');
+require("dotenv").config();
+const express = require("express");
+const bodyParser = require("body-parser");
+const cors = require("cors");
+const net = require("net");
+const { exec, execFile } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const bwipjs = require("bwip-js");
+const PDFDocument = require("pdfkit");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -22,23 +22,29 @@ app.use(bodyParser.json());
 // ============================================================================
 
 // Printer connection method: 'network' or 'usb'
-const CONNECTION_TYPE = process.env.CONNECTION_TYPE || 'usb';
+const CONNECTION_TYPE = process.env.CONNECTION_TYPE || "usb";
 
 // For network printing
-const PRINTER_IP = process.env.PRINTER_IP || '192.168.1.100';
+const PRINTER_IP = process.env.PRINTER_IP || "192.168.1.100";
 const PRINTER_PORT = process.env.PRINTER_PORT || 9100;
 
 // For USB printing (printer name as shown in system)
-const PRINTER_NAME = process.env.PRINTER_NAME || 'ZDesigner ZC300';
+const PRINTER_NAME = process.env.PRINTER_NAME || "ZDesigner ZC300";
 
 // Print format: 'zpl' or 'barcode'.
 // 'barcode' generates a Code128 image from cardNumber and prints it via driver.
-const ALLOWED_PRINT_FORMATS = new Set(['zpl', 'barcode']);
-const rawPrintFormat = String(process.env.PRINT_FORMAT || 'barcode').trim().toLowerCase();
-const PRINT_FORMAT = ALLOWED_PRINT_FORMATS.has(rawPrintFormat) ? rawPrintFormat : 'barcode';
+const ALLOWED_PRINT_FORMATS = new Set(["zpl", "barcode"]);
+const rawPrintFormat = String(process.env.PRINT_FORMAT || "barcode")
+    .trim()
+    .toLowerCase();
+const PRINT_FORMAT = ALLOWED_PRINT_FORMATS.has(rawPrintFormat)
+    ? rawPrintFormat
+    : "barcode";
 
 if (rawPrintFormat !== PRINT_FORMAT) {
-    console.warn(`Invalid PRINT_FORMAT="${rawPrintFormat}". Falling back to "${PRINT_FORMAT}".`);
+    console.warn(
+        `Invalid PRINT_FORMAT="${rawPrintFormat}". Falling back to "${PRINT_FORMAT}".`,
+    );
 }
 
 // ============================================================================
@@ -51,7 +57,7 @@ if (rawPrintFormat !== PRINT_FORMAT) {
  */
 function generateCardZPL(cardData) {
     const { cardNumber } = cardData;
-    
+
     const zpl = `
 ^XA
 
@@ -60,7 +66,7 @@ function generateCardZPL(cardData) {
 ^LL406
 ^LS0
 
-^FT50,80^A0N,40,40^FH^CI28^FDCard: ${cardNumber || ''}^FS^CI27
+^FT50,80^A0N,40,40^FH^CI28^FDCard: ${cardNumber || ""}^FS^CI27
 
 ^FT50,250^BY3,3,120^BCN,120,Y,N,N
 ^FD${cardNumber}^FS
@@ -68,31 +74,33 @@ function generateCardZPL(cardData) {
 ^PQ1,0,1,Y
 ^XZ
 `;
-    
+
     return zpl;
 }
-
 
 /**
  * Generate a barcode image buffer (PNG) from the card number.
  */
 function generateBarcodePng(cardNumber) {
     return new Promise((resolve, reject) => {
-        bwipjs.toBuffer({
-            bcid: 'code128',
-            text: String(cardNumber || ''),
-            scale: 3,
-            height: 14,
-            includetext: false,
-            textxalign: 'center',
-            backgroundcolor: 'FFFFFF'
-        }, (err, png) => {
-            if (err) {
-                reject(err);
-                return;
-            }
-            resolve(png);
-        });
+        bwipjs.toBuffer(
+            {
+                bcid: "code128",
+                text: String(cardNumber || ""),
+                scale: 3,
+                height: 14,
+                includetext: false,
+                textxalign: "center",
+                backgroundcolor: "FFFFFF",
+            },
+            (err, png) => {
+                if (err) {
+                    reject(err);
+                    return;
+                }
+                resolve(png);
+            },
+        );
     });
 }
 
@@ -100,11 +108,13 @@ function generateBarcodePng(cardNumber) {
  * Decode a data URL image string to Buffer.
  */
 function parseDataUrlImageBuffer(dataUrl) {
-    const match = String(dataUrl || '').match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/);
+    const match = String(dataUrl || "").match(
+        /^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/,
+    );
     if (!match) {
-        throw new Error('Invalid data URL image format');
+        throw new Error("Invalid data URL image format");
     }
-    return Buffer.from(match[1], 'base64');
+    return Buffer.from(match[1], "base64");
 }
 
 /**
@@ -115,12 +125,14 @@ async function loadPhotoBuffer(photoUrl) {
         return null;
     }
 
-    if (String(photoUrl).startsWith('data:image/')) {
+    if (String(photoUrl).startsWith("data:image/")) {
         return parseDataUrlImageBuffer(photoUrl);
     }
 
-    if (typeof fetch !== 'function') {
-        throw new Error('Global fetch is not available in this Node.js runtime');
+    if (typeof fetch !== "function") {
+        throw new Error(
+            "Global fetch is not available in this Node.js runtime",
+        );
     }
 
     const response = await fetch(photoUrl);
@@ -128,9 +140,11 @@ async function loadPhotoBuffer(photoUrl) {
         throw new Error(`Failed to download photo: HTTP ${response.status}`);
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    if (!contentType.startsWith('image/')) {
-        throw new Error(`photoUrl is not an image (content-type: ${contentType || 'unknown'})`);
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.startsWith("image/")) {
+        throw new Error(
+            `photoUrl is not an image (content-type: ${contentType || "unknown"})`,
+        );
     }
 
     const arrayBuffer = await response.arrayBuffer();
@@ -142,7 +156,7 @@ async function loadPhotoBuffer(photoUrl) {
  * This avoids printer-side full-page image scaling.
  */
 async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
-    const safeNumber = String(cardNumber || '').trim();
+    const safeNumber = String(cardNumber || "").trim();
     const barcodePng = await generateBarcodePng(safeNumber);
 
     // CR80 card in points: 3.37in x 2.125in at 72pt/in
@@ -153,16 +167,16 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
         const doc = new PDFDocument({
             size: [cardWidthPt, cardHeightPt],
             margin: 0,
-            info: { Title: 'Card Barcode Print' }
+            info: { Title: "Card Barcode Print" },
         });
 
         const chunks = [];
-        doc.on('data', (chunk) => chunks.push(chunk));
-        doc.on('error', reject);
-        doc.on('end', () => resolve(Buffer.concat(chunks)));
+        doc.on("data", (chunk) => chunks.push(chunk));
+        doc.on("error", reject);
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-        doc.rect(0, 0, cardWidthPt, cardHeightPt).fill('#FFFFFF');
-        doc.fillColor('#000000');
+        doc.rect(0, 0, cardWidthPt, cardHeightPt).fill("#FFFFFF");
+        doc.fillColor("#000000");
 
         if (photoBuffer) {
             // Left photo block when image is provided.
@@ -172,30 +186,30 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
             const photoH = 95;
             doc.image(photoBuffer, photoX, photoY, {
                 fit: [photoW, photoH],
-                align: 'center',
-                valign: 'center'
+                align: "center",
+                valign: "center",
             });
 
             // Right text + barcode block.
             const contentX = 90;
             const contentW = cardWidthPt - contentX - 10;
-            doc.font('Helvetica').fontSize(13);
+            doc.font("Helvetica").fontSize(13);
             doc.text(safeNumber, contentX, 20, {
                 width: contentW,
-                align: 'center'
+                align: "center",
             });
 
             doc.image(barcodePng, contentX + 6, 58, {
                 fit: [contentW - 12, 50],
-                align: 'center',
-                valign: 'center'
+                align: "center",
+                valign: "center",
             });
         } else {
             // Centered text + barcode block without photo.
-            doc.font('Helvetica').fontSize(16);
+            doc.font("Helvetica").fontSize(16);
             doc.text(safeNumber, 0, 18, {
                 width: cardWidthPt,
-                align: 'center'
+                align: "center",
             });
 
             const barcodeWidth = 165;
@@ -204,7 +218,7 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
             const barcodeY = 58;
             doc.image(barcodePng, barcodeX, barcodeY, {
                 width: barcodeWidth,
-                height: barcodeHeight
+                height: barcodeHeight,
             });
         }
 
@@ -218,27 +232,30 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
 function getAvailablePrinters() {
     return new Promise((resolve, reject) => {
         let cmd;
-        
-        if (os.platform() === 'darwin') { // macOS
+
+        if (os.platform() === "darwin") {
+            // macOS
             // Force C locale so parsing stays stable on non-English systems.
-            cmd = 'LC_ALL=C lpstat -p | awk \'/^printer / {print $2}\'';
-        } else if (os.platform() === 'win32') { // Windows
-            cmd = 'wmic printer get name';
-        } else { // Linux
-            cmd = 'lpstat -p | awk \'{print $2}\'';
+            cmd = "LC_ALL=C lpstat -p | awk '/^printer / {print $2}'";
+        } else if (os.platform() === "win32") {
+            // Windows
+            cmd = "wmic printer get name";
+        } else {
+            // Linux
+            cmd = "lpstat -p | awk '{print $2}'";
         }
-        
+
         exec(cmd, (error, stdout, stderr) => {
             if (error) {
                 reject(error);
                 return;
             }
-            
+
             const printers = stdout
-                .split('\n')
-                .map(line => line.trim())
-                .filter(line => line && line !== 'Name');
-            
+                .split("\n")
+                .map((line) => line.trim())
+                .filter((line) => line && line !== "Name");
+
             resolve(printers);
         });
     });
@@ -251,29 +268,33 @@ function sendToNetworkPrinter(ip, port, zplData) {
     return new Promise((resolve, reject) => {
         const client = new net.Socket();
         let connected = false;
-        
+
         client.connect(port, ip, () => {
             connected = true;
             console.log(`✓ Connected to printer at ${ip}:${port}`);
             client.write(zplData);
         });
-        
-        client.on('data', (data) => {
-            console.log('Printer response:', data.toString());
+
+        client.on("data", (data) => {
+            console.log("Printer response:", data.toString());
         });
-        
-        client.on('close', () => {
+
+        client.on("close", () => {
             if (connected) {
-                console.log('✓ Connection closed');
-                resolve({ success: true, method: 'network' });
+                console.log("✓ Connection closed");
+                resolve({ success: true, method: "network" });
             }
         });
-        
-        client.on('error', (err) => {
-            console.error('Network error:', err.message);
-            reject(new Error(`Cannot connect to printer at ${ip}:${port} - ${err.message}`));
+
+        client.on("error", (err) => {
+            console.error("Network error:", err.message);
+            reject(
+                new Error(
+                    `Cannot connect to printer at ${ip}:${port} - ${err.message}`,
+                ),
+            );
         });
-        
+
         // Close connection after sending
         setTimeout(() => {
             client.end();
@@ -288,39 +309,52 @@ function sendToUSBPrinter(printerName, zplData) {
     return new Promise((resolve, reject) => {
         // Create temp file with ZPL data
         const tempFile = path.join(os.tmpdir(), `zebra_${Date.now()}.zpl`);
-        
+
         fs.writeFile(tempFile, zplData, (err) => {
             if (err) {
                 reject(err);
                 return;
             }
-            
+
             let cmd;
-            if (os.platform() === 'darwin') { // macOS
+            if (os.platform() === "darwin") {
+                // macOS
                 // Use lp to get a job id back for easier diagnostics.
                 cmd = `lp -d "${printerName}" -o raw "${tempFile}"`;
-            } else if (os.platform() === 'win32') { // Windows
+            } else if (os.platform() === "win32") {
+                // Windows
                 cmd = `notepad /p "${tempFile}"`; // Will need printer.dll or PrintDirect.exe for proper raw printing
-            } else { // Linux
+            } else {
+                // Linux
                 cmd = `lp -d "${printerName}" -o raw "${tempFile}"`;
             }
-            
+
             exec(cmd, (error, stdout, stderr) => {
                 // Clean up temp file
                 fs.unlink(tempFile, () => {});
-                
+
                 if (error) {
                     reject(new Error(`Print command failed: ${error.message}`));
                     return;
                 }
-                
-                const output = `${stdout || ''}${stderr || ''}`.trim();
-                const normalizedOutput = output.replace(/[–—−]/g, '-');
-                const jobMatch = normalizedOutput.match(/\b([A-Za-z0-9_\-]+-\d+)\b/);
+
+                const output = `${stdout || ""}${stderr || ""}`.trim();
+                const normalizedOutput = output.replace(/[–—−]/g, "-");
+                const jobMatch = normalizedOutput.match(
+                    /\b([A-Za-z0-9_\-]+-\d+)\b/,
+                );
                 const jobId = jobMatch ? jobMatch[1] : null;
 
-                console.log('✓ Print job sent to USB printer', jobId ? `(${jobId})` : '');
-                resolve({ success: true, method: 'usb', jobId, commandOutput: output });
+                console.log(
+                    "✓ Print job sent to USB printer",
+                    jobId ? `(${jobId})` : "",
+                );
+                resolve({
+                    success: true,
+                    method: "usb",
+                    jobId,
+                    commandOutput: output,
+                });
             });
         });
     });
@@ -336,10 +370,11 @@ function runCommand(command, args = []) {
                 success: !error,
                 command,
                 args,
-                code: error && typeof error.code !== 'undefined' ? error.code : 0,
-                stdout: String(stdout || '').trim(),
-                stderr: String(stderr || '').trim(),
-                error: error ? error.message : null
+                code:
+                    error && typeof error.code !== "undefined" ? error.code : 0,
+                stdout: String(stdout || "").trim(),
+                stderr: String(stderr || "").trim(),
+                error: error ? error.message : null,
             });
         });
     });
@@ -349,31 +384,39 @@ function runCommand(command, args = []) {
  * Run a PowerShell script and return structured output.
  */
 function runPowerShell(script) {
-    const shell = os.platform() === 'win32' ? 'powershell.exe' : 'powershell';
-    return runCommand(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
+    const shell = os.platform() === "win32" ? "powershell.exe" : "powershell";
+    return runCommand(shell, [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]);
 }
 
 /**
  * Escape a string for a PowerShell single-quoted literal.
  */
 function escapePowerShellSingleQuoted(value) {
-    return String(value || '').replace(/'/g, "''");
+    return String(value || "").replace(/'/g, "''");
 }
 
 /**
  * Attempt to recover a stuck CUPS queue for the configured printer.
  */
 async function cleanupPrinterQueueCups(printerName) {
-    const cancelAll = await runCommand('cancel', ['-a', printerName]);
-    const disable = await runCommand('cupsdisable', [printerName]);
-    const enable = await runCommand('cupsenable', [printerName]);
-    const status = await runCommand('lpstat', ['-p', printerName]);
+    const cancelAll = await runCommand("cancel", ["-a", printerName]);
+    const disable = await runCommand("cupsdisable", [printerName]);
+    const enable = await runCommand("cupsenable", [printerName]);
+    const status = await runCommand("lpstat", ["-p", printerName]);
 
-    const combinedCancelOutput = `${cancelAll.stdout} ${cancelAll.stderr}`.toLowerCase();
-    const cancelIsNonBlocking = cancelAll.success ||
-        combinedCancelOutput.includes('not found') ||
-        combinedCancelOutput.includes('no jobs') ||
-        combinedCancelOutput.includes('unknown');
+    const combinedCancelOutput =
+        `${cancelAll.stdout} ${cancelAll.stderr}`.toLowerCase();
+    const cancelIsNonBlocking =
+        cancelAll.success ||
+        combinedCancelOutput.includes("not found") ||
+        combinedCancelOutput.includes("no jobs") ||
+        combinedCancelOutput.includes("unknown");
 
     const success = cancelIsNonBlocking && disable.success && enable.success;
 
@@ -383,12 +426,12 @@ async function cleanupPrinterQueueCups(printerName) {
         steps: {
             cancelAll: {
                 ...cancelAll,
-                treatedAsSuccess: cancelIsNonBlocking
+                treatedAsSuccess: cancelIsNonBlocking,
             },
             disable,
             enable,
-            status
-        }
+            status,
+        },
     };
 }
 
@@ -399,7 +442,8 @@ async function cleanupPrinterQueueWindows(printerName) {
     const safePrinterName = escapePowerShellSingleQuoted(printerName);
 
     const clearJobsScript = `$p='${safePrinterName}'; if (Get-Command Get-PrintJob -ErrorAction SilentlyContinue) { Get-PrintJob -PrinterName $p -ErrorAction SilentlyContinue | Remove-PrintJob -ErrorAction SilentlyContinue; Write-Output 'Print jobs cleared (if any).'; } else { Write-Output 'Get-PrintJob cmdlet unavailable on this system.'; }`;
-    const restartSpoolerScript = "Restart-Service -Name Spooler -Force; Write-Output 'Spooler restarted.'";
+    const restartSpoolerScript =
+        "Restart-Service -Name Spooler -Force; Write-Output 'Spooler restarted.'";
     const statusScript = `$p='${safePrinterName}'; if (Get-Command Get-Printer -ErrorAction SilentlyContinue) { Get-Printer -Name $p | Select-Object Name,PrinterStatus,WorkOffline,DriverName | ConvertTo-Json -Compress; } else { Write-Output 'Get-Printer cmdlet unavailable on this system.'; }`;
 
     const clearJobs = await runPowerShell(clearJobsScript);
@@ -412,8 +456,8 @@ async function cleanupPrinterQueueWindows(printerName) {
         steps: {
             clearJobs,
             restartSpooler,
-            status
-        }
+            status,
+        },
     };
 }
 
@@ -421,7 +465,7 @@ async function cleanupPrinterQueueWindows(printerName) {
  * Attempt to recover a stuck print queue based on current OS.
  */
 async function cleanupPrinterQueue(printerName) {
-    if (os.platform() === 'win32') {
+    if (os.platform() === "win32") {
         return cleanupPrinterQueueWindows(printerName);
     }
 
@@ -433,32 +477,34 @@ async function cleanupPrinterQueue(printerName) {
  * Strategy: SumatraPDF (if available) -> PowerShell PrintTo fallback.
  */
 async function printPdfOnWindows(printerName, pdfFilePath) {
-    const configuredSumatraPath = String(process.env.SUMATRA_PDF_PATH || '').trim();
+    const configuredSumatraPath = String(
+        process.env.SUMATRA_PDF_PATH || "",
+    ).trim();
     const sumatraCandidates = [
         configuredSumatraPath,
-        'SumatraPDF.exe',
-        'sumatrapdf.exe'
+        "SumatraPDF.exe",
+        "sumatrapdf.exe",
     ].filter(Boolean);
 
     for (const candidate of sumatraCandidates) {
-        const check = await runCommand(candidate, ['-v']);
+        const check = await runCommand(candidate, ["-v"]);
         if (!check.success) {
             continue;
         }
 
         const printResult = await runCommand(candidate, [
-            '-print-to',
+            "-print-to",
             printerName,
-            '-silent',
-            '-exit-on-print',
-            pdfFilePath
+            "-silent",
+            "-exit-on-print",
+            pdfFilePath,
         ]);
 
         if (printResult.success) {
             return {
                 success: true,
-                strategy: 'sumatra',
-                details: printResult
+                strategy: "sumatra",
+                details: printResult,
             };
         }
     }
@@ -471,15 +517,15 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
     if (printToResult.success) {
         return {
             success: true,
-            strategy: 'powershell-printto',
-            details: printToResult
+            strategy: "powershell-printto",
+            details: printToResult,
         };
     }
 
     return {
         success: false,
-        strategy: 'none',
-        details: printToResult
+        strategy: "none",
+        details: printToResult,
     };
 }
 
@@ -489,19 +535,27 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
 function sendBarcodeImageToUSBPrinter(printerName, cardData) {
     return new Promise(async (resolve, reject) => {
         try {
-            const safeCardNumber = String(cardData.cardNumber || '').trim();
+            const safeCardNumber = String(cardData.cardNumber || "").trim();
             let photoBuffer = null;
 
             if (cardData.photoUrl) {
                 try {
                     photoBuffer = await loadPhotoBuffer(cardData.photoUrl);
                 } catch (photoError) {
-                    console.warn(`⚠️  Photo could not be loaded, printing without photo: ${photoError.message}`);
+                    console.warn(
+                        `⚠️  Photo could not be loaded, printing without photo: ${photoError.message}`,
+                    );
                 }
             }
 
-            const pdfBuffer = await generateBarcodeCardPdf(safeCardNumber, photoBuffer);
-            const tempFile = path.join(os.tmpdir(), `zebra_barcode_${Date.now()}.pdf`);
+            const pdfBuffer = await generateBarcodeCardPdf(
+                safeCardNumber,
+                photoBuffer,
+            );
+            const tempFile = path.join(
+                os.tmpdir(),
+                `zebra_barcode_${Date.now()}.pdf`,
+            );
 
             fs.writeFile(tempFile, pdfBuffer, async (err) => {
                 if (err) {
@@ -509,40 +563,56 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
                     return;
                 }
 
-                if (os.platform() === 'win32') {
+                if (os.platform() === "win32") {
                     try {
-                        const winResult = await printPdfOnWindows(printerName, tempFile);
+                        const winResult = await printPdfOnWindows(
+                            printerName,
+                            tempFile,
+                        );
                         fs.unlink(tempFile, () => {});
 
                         if (!winResult.success) {
                             const detailText = [
                                 winResult.details && winResult.details.stdout,
                                 winResult.details && winResult.details.stderr,
-                                winResult.details && winResult.details.error
-                            ].filter(Boolean).join(' | ');
-                            reject(new Error(`Barcode print command failed on Windows: ${detailText || 'no additional details'}`));
+                                winResult.details && winResult.details.error,
+                            ]
+                                .filter(Boolean)
+                                .join(" | ");
+                            reject(
+                                new Error(
+                                    `Barcode print command failed on Windows: ${detailText || "no additional details"}`,
+                                ),
+                            );
                             return;
                         }
 
-                        const output = `${winResult.details.stdout || ''}${winResult.details.stderr || ''}`.trim();
-                        console.log(`✓ Barcode image print job sent (win32, ${winResult.strategy})`);
+                        const output =
+                            `${winResult.details.stdout || ""}${winResult.details.stderr || ""}`.trim();
+                        console.log(
+                            `✓ Barcode image print job sent (win32, ${winResult.strategy})`,
+                        );
                         resolve({
                             success: true,
-                            method: 'usb-barcode-win32',
+                            method: "usb-barcode-win32",
                             printStrategy: winResult.strategy,
                             commandOutput: output,
-                            photoIncluded: Boolean(photoBuffer)
+                            photoIncluded: Boolean(photoBuffer),
                         });
                         return;
                     } catch (winErr) {
                         fs.unlink(tempFile, () => {});
-                        reject(new Error(`Barcode print command failed on Windows: ${winErr.message}`));
+                        reject(
+                            new Error(
+                                `Barcode print command failed on Windows: ${winErr.message}`,
+                            ),
+                        );
                         return;
                     }
                 }
 
                 let cmd;
-                if (os.platform() === 'darwin' || os.platform() === 'linux') {
+                if (os.platform() === "darwin" || os.platform() === "linux") {
                     cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper "${tempFile}"`;
                 } else {
                     cmd = `lp -d "${printerName}" "${tempFile}"`;
@@ -552,22 +622,31 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
                     fs.unlink(tempFile, () => {});
 
                     if (error) {
-                        reject(new Error(`Barcode print command failed: ${error.message}`));
+                        reject(
+                            new Error(
+                                `Barcode print command failed: ${error.message}`,
+                            ),
+                        );
                         return;
                     }
 
-                    const output = `${stdout || ''}${stderr || ''}`.trim();
-                    const normalizedOutput = output.replace(/[–—−]/g, '-');
-                    const jobMatch = normalizedOutput.match(/\b([A-Za-z0-9_\-]+-\d+)\b/);
+                    const output = `${stdout || ""}${stderr || ""}`.trim();
+                    const normalizedOutput = output.replace(/[–—−]/g, "-");
+                    const jobMatch = normalizedOutput.match(
+                        /\b([A-Za-z0-9_\-]+-\d+)\b/,
+                    );
                     const jobId = jobMatch ? jobMatch[1] : null;
 
-                    console.log('✓ Barcode image print job sent', jobId ? `(${jobId})` : '');
+                    console.log(
+                        "✓ Barcode image print job sent",
+                        jobId ? `(${jobId})` : "",
+                    );
                     resolve({
                         success: true,
-                        method: 'usb-barcode',
+                        method: "usb-barcode",
                         jobId,
                         commandOutput: output,
-                        photoIncluded: Boolean(photoBuffer)
+                        photoIncluded: Boolean(photoBuffer),
                     });
                 });
             });
@@ -581,7 +660,7 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
  * Main function to send to printer (routes to network or USB)
  */
 function sendToPrinter(zplData) {
-    if (CONNECTION_TYPE === 'network') {
+    if (CONNECTION_TYPE === "network") {
         return sendToNetworkPrinter(PRINTER_IP, PRINTER_PORT, zplData);
     } else {
         return sendToUSBPrinter(PRINTER_NAME, zplData);
@@ -592,9 +671,11 @@ function sendToPrinter(zplData) {
  * Print card using configured format.
  */
 function printCardData(cardData) {
-    if (PRINT_FORMAT === 'barcode') {
-        if (CONNECTION_TYPE !== 'usb') {
-            throw new Error('PRINT_FORMAT=barcode is only supported with CONNECTION_TYPE=usb');
+    if (PRINT_FORMAT === "barcode") {
+        if (CONNECTION_TYPE !== "usb") {
+            throw new Error(
+                "PRINT_FORMAT=barcode is only supported with CONNECTION_TYPE=usb",
+            );
         }
 
         return sendBarcodeImageToUSBPrinter(PRINTER_NAME, cardData);
@@ -610,32 +691,33 @@ function printCardData(cardData) {
 /**
  * Health check endpoint
  */
-app.get('/health', (req, res) => {
+app.get("/health", (req, res) => {
     res.json({
-        status: 'online',
-        service: 'Zebra ZC300 Print Service',
-        timestamp: new Date().toISOString()
+        status: "online",
+        service: "Zebra ZC300 Print Service",
+        timestamp: new Date().toISOString(),
     });
 });
 
 /**
  * Get available printers
  */
-app.get('/printers', async (req, res) => {
+app.get("/printers", async (req, res) => {
     try {
         const printers = await getAvailablePrinters();
         res.json({
             success: true,
             connectionType: CONNECTION_TYPE,
             printers: printers,
-            currentPrinter: CONNECTION_TYPE === 'network' 
-                ? `${PRINTER_IP}:${PRINTER_PORT}`
-                : PRINTER_NAME
+            currentPrinter:
+                CONNECTION_TYPE === "network"
+                    ? `${PRINTER_IP}:${PRINTER_PORT}`
+                    : PRINTER_NAME,
         });
     } catch (error) {
         res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
         });
     }
 });
@@ -643,43 +725,43 @@ app.get('/printers', async (req, res) => {
 /**
  * Main print endpoint - receives card data and prints to Zebra
  */
-app.post('/print', async (req, res) => {
+app.post("/print", async (req, res) => {
     try {
         const cardData = req.body;
-        
+
         // Validate required fields
         if (!cardData.cardNumber) {
             return res.status(400).json({
                 success: false,
-                error: 'cardNumber is required'
+                error: "cardNumber is required",
             });
         }
-        
-        console.log('📄 Print request received:', {
+
+        console.log("📄 Print request received:", {
             cardNumber: cardData.cardNumber,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
         });
-        
+
         // Print in configured format (zpl or barcode)
         const result = await printCardData(cardData);
-        
+
         res.json({
             success: true,
-            message: 'Card sent to printer successfully',
+            message: "Card sent to printer successfully",
             method: result.method,
             format: PRINT_FORMAT,
             jobId: result.jobId || null,
             photoIncluded: Boolean(result.photoIncluded),
-            printer: CONNECTION_TYPE === 'network' 
-                ? `${PRINTER_IP}:${PRINTER_PORT}`
-                : PRINTER_NAME
+            printer:
+                CONNECTION_TYPE === "network"
+                    ? `${PRINTER_IP}:${PRINTER_PORT}`
+                    : PRINTER_NAME,
         });
-        
     } catch (error) {
-        console.error('❌ Print error:', error);
+        console.error("❌ Print error:", error);
         res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
         });
     }
 });
@@ -687,25 +769,24 @@ app.post('/print', async (req, res) => {
 /**
  * Test print endpoint - prints a simple test card
  */
-app.post('/test', async (req, res) => {
+app.post("/test", async (req, res) => {
     try {
         const testCard = {
-            cardNumber: 'TEST-' + Date.now()
+            cardNumber: "TEST-" + Date.now(),
         };
         const result = await printCardData(testCard);
         res.json({
             success: true,
-            message: 'Test card sent to printer',
+            message: "Test card sent to printer",
             method: result.method,
             format: PRINT_FORMAT,
             jobId: result.jobId || null,
-            testData: testCard
+            testData: testCard,
         });
-        
     } catch (error) {
         res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
         });
     }
 });
@@ -713,12 +794,12 @@ app.post('/test', async (req, res) => {
 /**
  * Cleanup endpoint - clears pending jobs and resets spooler/queue.
  */
-app.post('/cleanup', async (req, res) => {
+app.post("/cleanup", async (req, res) => {
     try {
-        if (CONNECTION_TYPE !== 'usb') {
+        if (CONNECTION_TYPE !== "usb") {
             return res.status(400).json({
                 success: false,
-                error: 'cleanup endpoint is intended for usb queue mode'
+                error: "cleanup endpoint is intended for usb queue mode",
             });
         }
 
@@ -728,69 +809,70 @@ app.post('/cleanup', async (req, res) => {
         return res.status(statusCode).json({
             success: result.success,
             message: result.success
-                ? 'Printer queue cleanup completed'
-                : 'Printer queue cleanup ran with errors',
+                ? "Printer queue cleanup completed"
+                : "Printer queue cleanup ran with errors",
             printer: result.printer,
             connectionType: CONNECTION_TYPE,
-            steps: result.steps
+            steps: result.steps,
         });
     } catch (error) {
         return res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
         });
     }
 });
-
 
 // ============================================================================
 // START SERVER
 // ============================================================================
 
 app.listen(PORT, async () => {
-    console.log('════════════════════════════════════════════════════════════');
-    console.log('   🖨️  ZEBRA ZC300 LOCAL PRINT SERVICE                       ');
-    console.log('════════════════════════════════════════════════════════════');
+    console.log("════════════════════════════════════════════════════════════");
+    console.log(
+        "   🖨️  ZEBRA ZC300 LOCAL PRINT SERVICE                       ",
+    );
+    console.log("════════════════════════════════════════════════════════════");
     console.log(`Server running on: http://localhost:${PORT}`);
     console.log(`Connection type: ${CONNECTION_TYPE.toUpperCase()}`);
     console.log(`Print format: ${PRINT_FORMAT.toUpperCase()}`);
-    
-    if (CONNECTION_TYPE === 'network') {
+
+    if (CONNECTION_TYPE === "network") {
         console.log(`Printer: ${PRINTER_IP}:${PRINTER_PORT}`);
     } else {
         console.log(`🖨️  Printer: ${PRINTER_NAME}`);
     }
-    
-    console.log('');
-    console.log('Available endpoints:');
+
+    console.log("");
+    console.log("Available endpoints:");
     console.log(`  GET  /health   - Health check`);
     console.log(`  GET  /printers - List available printers`);
     console.log(`  POST /print    - Print card`);
     console.log(`  POST /test     - Print test card`);
     console.log(`  POST /cleanup  - Reset printer queue/spooler`);
-    console.log('');
-    
+    console.log("");
+
     // List available printers on startup
     try {
         const printers = await getAvailablePrinters();
-        console.log('🖨️  Available system printers:');
-        printers.forEach(p => {
+        console.log("🖨️  Available system printers:");
+        printers.forEach((p) => {
             console.log(`   - ${p}`);
         });
     } catch (error) {
-        console.error('⚠️  Could not list printers:', error.message);
+        console.error("⚠️  Could not list printers:", error.message);
     }
-    
-    console.log('');
-    console.log('✓ Service ready to receive print requests');
-    console.log('════════════════════════════════════════════════════════════');
+
+    console.log("");
+    console.log("✓ Service ready to receive print requests");
+    console.log("════════════════════════════════════════════════════════════");
 });
 
 // Error handling
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
+process.on("uncaughtException", (error) => {
+    console.error("Uncaught Exception:", error);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+process.on("unhandledRejection", (reason, promise) => {
+    console.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
