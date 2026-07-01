@@ -12,10 +12,91 @@ const PDFDocument = require("pdfkit");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const SERVER_HOST = process.env.SERVER_HOST || "0.0.0.0";
+
+// Optional network metadata (informational for deployment docs/diagnostics)
+const NETWORK_FIXED_IP = process.env.NETWORK_FIXED_IP || "192.168.0.244";
+const NETWORK_GATEWAY = process.env.NETWORK_GATEWAY || "192.168.1.246";
+const NETWORK_SUBNET_MASK =
+    process.env.NETWORK_SUBNET_MASK || "255.255.240.0";
+const NETWORK_DNS_PRIMARY = process.env.NETWORK_DNS_PRIMARY || "192.168.0.249";
+const NETWORK_DNS_SECONDARY = process.env.NETWORK_DNS_SECONDARY || "8.8.8.8";
+
+const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+const TRUSTED_CLIENT_IPS = new Set(
+    String(process.env.TRUSTED_CLIENT_IPS || "")
+        .split(",")
+        .map((ip) => ip.trim())
+        .filter(Boolean),
+);
 
 // Middleware
-app.use(cors()); // Allow API server to connect
+app.use(
+    cors({
+        origin(origin, callback) {
+            if (!origin || ALLOWED_ORIGINS.length === 0) {
+                callback(null, true);
+                return;
+            }
+
+            if (ALLOWED_ORIGINS.includes(origin)) {
+                callback(null, true);
+                return;
+            }
+
+            callback(new Error("Origin not allowed by CORS"));
+        },
+    }),
+);
 app.use(bodyParser.json());
+
+function normalizeIp(ip) {
+    if (!ip) {
+        return "";
+    }
+
+    const raw = String(ip).trim();
+    if (raw === "::1") {
+        return "127.0.0.1";
+    }
+
+    return raw.startsWith("::ffff:") ? raw.slice(7) : raw;
+}
+
+function getClientIp(req) {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (forwarded) {
+        const first = String(forwarded).split(",")[0];
+        return normalizeIp(first);
+    }
+
+    return normalizeIp(req.socket && req.socket.remoteAddress);
+}
+
+app.use((req, res, next) => {
+    if (TRUSTED_CLIENT_IPS.size === 0) {
+        next();
+        return;
+    }
+
+    const clientIp = getClientIp(req);
+    const localAllowed = clientIp === "127.0.0.1";
+    const trusted = TRUSTED_CLIENT_IPS.has(clientIp);
+
+    if (localAllowed || trusted) {
+        next();
+        return;
+    }
+
+    res.status(403).json({
+        success: false,
+        error: `Client IP ${clientIp || "unknown"} is not allowed`,
+    });
+});
 
 // ============================================================================
 // CONFIGURATION
@@ -695,7 +776,32 @@ app.get("/health", (req, res) => {
     res.json({
         status: "online",
         service: "Zebra ZC300 Print Service",
+        host: SERVER_HOST,
+        port: Number(PORT),
+        clientIp: getClientIp(req),
         timestamp: new Date().toISOString(),
+    });
+});
+
+/**
+ * Network information endpoint for diagnostics/deployment verification.
+ */
+app.get("/network-info", (req, res) => {
+    res.json({
+        success: true,
+        listening: {
+            host: SERVER_HOST,
+            port: Number(PORT),
+        },
+        stationNetwork: {
+            fixedIp: NETWORK_FIXED_IP,
+            gateway: NETWORK_GATEWAY,
+            subnetMask: NETWORK_SUBNET_MASK,
+            dnsPrimary: NETWORK_DNS_PRIMARY,
+            dnsSecondary: NETWORK_DNS_SECONDARY,
+        },
+        trustedClientIps: Array.from(TRUSTED_CLIENT_IPS),
+        allowedOrigins: ALLOWED_ORIGINS,
     });
 });
 
@@ -827,13 +933,13 @@ app.post("/cleanup", async (req, res) => {
 // START SERVER
 // ============================================================================
 
-app.listen(PORT, async () => {
+app.listen(PORT, SERVER_HOST, async () => {
     console.log("════════════════════════════════════════════════════════════");
     console.log(
         "   🖨️  ZEBRA ZC300 LOCAL PRINT SERVICE                       ",
     );
     console.log("════════════════════════════════════════════════════════════");
-    console.log(`Server running on: http://localhost:${PORT}`);
+    console.log(`Server running on: http://${SERVER_HOST}:${PORT}`);
     console.log(`Connection type: ${CONNECTION_TYPE.toUpperCase()}`);
     console.log(`Print format: ${PRINT_FORMAT.toUpperCase()}`);
 
@@ -846,10 +952,24 @@ app.listen(PORT, async () => {
     console.log("");
     console.log("Available endpoints:");
     console.log(`  GET  /health   - Health check`);
+    console.log(`  GET  /network-info - Network config diagnostics`);
     console.log(`  GET  /printers - List available printers`);
     console.log(`  POST /print    - Print card`);
     console.log(`  POST /test     - Print test card`);
     console.log(`  POST /cleanup  - Reset printer queue/spooler`);
+    console.log("");
+
+    console.log("Network profile:");
+    console.log(`  Fixed IP: ${NETWORK_FIXED_IP}`);
+    console.log(`  Gateway: ${NETWORK_GATEWAY}`);
+    console.log(`  Subnet: ${NETWORK_SUBNET_MASK}`);
+    console.log(`  DNS: ${NETWORK_DNS_PRIMARY} / ${NETWORK_DNS_SECONDARY}`);
+    console.log(
+        `  Trusted clients: ${TRUSTED_CLIENT_IPS.size ? Array.from(TRUSTED_CLIENT_IPS).join(", ") : "(none - all accepted)"}`,
+    );
+    console.log(
+        `  CORS origins: ${ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS.join(", ") : "(none - all accepted)"}`,
+    );
     console.log("");
 
     // List available printers on startup

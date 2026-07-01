@@ -14,6 +14,26 @@ npm install
 ### 2️⃣ Configure Your Printer
 Edit the `.env` file:
 
+**For your new fixed-IP LAN setup (recommended for tomorrow):**
+```env
+# Service listener
+PORT=3001
+SERVER_HOST=0.0.0.0
+
+# Keep USB mode if printer is connected to this Windows PC
+CONNECTION_TYPE=usb
+PRINTER_NAME=ZDesigner ZC300
+PRINT_FORMAT=barcode
+
+# Restrict who can call this API (set your backend/server IP)
+TRUSTED_CLIENT_IPS=YOUR_SERVER_IP
+
+# Optional: restrict browser origins if needed
+ALLOWED_ORIGINS=https://your-api-domain.com
+
+# IT-provided network profile (informational, visible in /network-info)
+```
+
 **For USB Connection (Recommended):**
 ```env
 CONNECTION_TYPE=usb
@@ -69,6 +89,16 @@ Health check to verify service is running.
   "service": "Zebra ZC300 Print Service",
   "timestamp": "2026-02-16T10:30:00.000Z"
 }
+```
+
+---
+
+### `GET /network-info`
+Shows listener settings, trusted client list, CORS list, and the configured station network profile.
+
+**Test:**
+```bash
+curl http://localhost:3001/network-info
 ```
 
 **Test:**
@@ -167,3 +197,17 @@ kill -9 [PID]
 # Or change port in .env
 PORT=3002
 ```
+
+### Remote server cannot reach this PC
+1. Verify the service is listening on all interfaces:
+```bash
+curl http://localhost:3001/network-info
+```
+Look for `"host":"0.0.0.0"` and `"port":3001`.
+
+2. From your backend/server machine, test:
+```bash
+curl http://192.168.0.244:3001/health
+```
+
+3. If you configured `TRUSTED_CLIENT_IPS`, ensure it includes your backend server IP exactly.
