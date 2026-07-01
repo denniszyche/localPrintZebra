@@ -14,7 +14,7 @@ npm install
 ### 2️⃣ Configure Your Printer
 Edit the `.env` file:
 
-**For your new fixed-IP LAN setup (recommended for tomorrow):**
+**For your new fixed-IP LAN setup (test:02-07-2026):**
 ```env
 # Service listener
 PORT=3001
