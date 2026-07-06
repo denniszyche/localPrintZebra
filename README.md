@@ -184,6 +184,46 @@ curl -X POST http://localhost:3001/cleanup
 
 ---
 
+## 📡 External Connectivity Probe (for IT / Firewall diagnostics)
+
+Use this when IT/Telmex asks for continuous traffic generation to diagnose blocks.
+
+The probe runs repeated checks against a target host and port:
+- TCP connect check (`host:port`)
+- HTTP GET to `/health`
+- JSON line logs per cycle (easy to share with IT)
+
+### Quick test (3 minutes)
+```bash
+npm run probe:connectivity:quick
+```
+
+### Long run (30 minutes default)
+```bash
+npm run probe:connectivity
+```
+
+### Custom target and output file
+```bash
+node scripts/connectivity-probe.js \
+  --host 187.170.149.5 \
+  --port 3001 \
+  --path /health \
+  --intervalMs 10000 \
+  --timeoutMs 8000 \
+  --durationSec 3600 \
+  --output ./probe-log.jsonl
+```
+
+### How to interpret results
+- `tcp.status: "open"` and HTTP `statusCode: 200`: route is reachable.
+- TCP timeout/error and HTTP timeout: likely blocked before app host (NAT/firewall/ISP).
+- TCP open but HTTP failing: app/service layer issue.
+
+Tip: Run this probe from an external network (or cloud host) so it tests the same path your API uses.
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Service won't start
