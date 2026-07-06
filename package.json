@@ -5,9 +5,7 @@
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
-    "dev": "nodemon app.js",
-    "probe:connectivity": "node scripts/connectivity-probe.js",
-    "probe:connectivity:quick": "node scripts/connectivity-probe.js --durationSec 180 --intervalMs 10000"
+    "dev": "nodemon app.js"
   },
   "author": "dennis zyche",
   "license": "ISC",
