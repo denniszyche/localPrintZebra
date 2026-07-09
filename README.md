@@ -223,3 +223,5 @@ Invoke-WebRequest -Uri "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resource
 & $sumatra -print-to "Zebra_Technologies_ZTC_ZC300" -silent -exit-on-print $pdf
 
 Start-Process -FilePath "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe" -ArgumentList "-print-to","Zebra_Technologies_ZTC_ZC300","-silent","-exit-on-print",$pdf -Wait
+
+Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"NO-PHOTO-123"}'
