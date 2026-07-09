@@ -211,23 +211,3 @@ curl http://192.168.0.244:3001/health
 ```
 
 3. If you configured `TRUSTED_CLIENT_IPS`, ensure it includes your backend server IP exactly.
-
-
-Invoke-WebRequest -Uri "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" -OutFile "$env:TEMP\test.pdf"
-& "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe" -print-to "Zebra_Technologies_ZTC_ZC300" -silent -exit-on-print "$env:TEMP\test.pdf"
-
-
-$sumatra = "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe"
-$pdf = "$env:TEMP\test.pdf"
-Invoke-WebRequest -Uri "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" -OutFile $pdf
-& $sumatra -print-to "Zebra_Technologies_ZTC_ZC300" -silent -exit-on-print $pdf
-
-Start-Process -FilePath "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe" -ArgumentList "-print-to","Zebra_Technologies_ZTC_ZC300","-silent","-exit-on-print",$pdf -Wait
-
-Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"NO-PHOTO-123"}'
-
-Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"IMG-TEST-1","photoUrl":"https://picsum.photos/300"}'
-
-Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"SAFE-TEST-1"}'
-
-Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"SAFE-TEST-2","photoUrl":"https://picsum.photos/300.jpg"}'
