@@ -211,3 +211,7 @@ curl http://192.168.0.244:3001/health
 ```
 
 3. If you configured `TRUSTED_CLIENT_IPS`, ensure it includes your backend server IP exactly.
+
+
+Invoke-WebRequest -Uri "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" -OutFile "$env:TEMP\test.pdf"
+& "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe" -print-to "Zebra_Technologies_ZTC_ZC300" -silent -exit-on-print "$env:TEMP\test.pdf"
