@@ -221,3 +221,5 @@ $sumatra = "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe"
 $pdf = "$env:TEMP\test.pdf"
 Invoke-WebRequest -Uri "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" -OutFile $pdf
 & $sumatra -print-to "Zebra_Technologies_ZTC_ZC300" -silent -exit-on-print $pdf
+
+Start-Process -FilePath "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe" -ArgumentList "-print-to","Zebra_Technologies_ZTC_ZC300","-silent","-exit-on-print",$pdf -Wait
