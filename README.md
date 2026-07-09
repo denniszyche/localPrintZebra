@@ -227,3 +227,7 @@ Start-Process -FilePath "C:\Users\user\AppData\Local\SumatraPDF\SumatraPDF.exe" 
 Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"NO-PHOTO-123"}'
 
 Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"IMG-TEST-1","photoUrl":"https://picsum.photos/300"}'
+
+Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"SAFE-TEST-1"}'
+
+Invoke-RestMethod -Method Post http://localhost:3001/print -ContentType "application/json" -Body '{"cardNumber":"SAFE-TEST-2","photoUrl":"https://picsum.photos/300.jpg"}'
