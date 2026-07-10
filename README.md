@@ -39,6 +39,10 @@ ALLOWED_ORIGINS=https://your-api-domain.com
 CONNECTION_TYPE=usb
 PRINTER_NAME=ZDesigner ZC300
 PRINT_FORMAT=barcode
+
+# Optional on Windows for silent PDF printing without opening a viewer
+# SUMATRA_PDF_PATH=C:\\Users\\YOUR_USER\\AppData\\Local\\SumatraPDF\\SumatraPDF.exe
+# ADOBE_READER_PATH=C:\\Program Files (x86)\\Adobe\\Acrobat Reader DC\\Reader\\AcroRd32.exe
 ```
 
 **For Network Connection:**
@@ -74,6 +78,9 @@ For development with auto-restart:
 ```bash
 npm run dev
 ```
+
+### Windows Silent Printing
+When `PRINT_FORMAT=barcode` is used on Windows, the service now avoids the Windows `PrintTo` fallback because it opens the default PDF viewer. For silent printing, install SumatraPDF or Adobe Reader on the Windows machine. SumatraPDF is preferred because it supports direct headless printing and exits automatically after the job is queued.
 
 ---
 

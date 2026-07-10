@@ -483,6 +483,36 @@ function escapePowerShellSingleQuoted(value) {
 }
 
 /**
+ * Resolve a Windows executable from an explicit path or PATH lookup.
+ */
+async function resolveWindowsExecutable(candidates) {
+    for (const candidate of candidates.filter(Boolean)) {
+        if (path.isAbsolute(candidate) || /[\\/]/.test(candidate)) {
+            if (fs.existsSync(candidate)) {
+                return candidate;
+            }
+            continue;
+        }
+
+        const lookup = await runCommand("where.exe", [candidate]);
+        if (!lookup.success || !lookup.stdout) {
+            continue;
+        }
+
+        const resolved = lookup.stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .find(Boolean);
+
+        if (resolved) {
+            return resolved;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Attempt to recover a stuck CUPS queue for the configured printer.
  */
 async function cleanupPrinterQueueCups(printerName) {
@@ -555,7 +585,7 @@ async function cleanupPrinterQueue(printerName) {
 
 /**
  * Print a generated PDF on Windows.
- * Strategy: SumatraPDF (if available) -> PowerShell PrintTo fallback.
+ * Strategy: silent CLI tools only to avoid opening a PDF viewer window.
  */
 async function printPdfOnWindows(printerName, pdfFilePath) {
     const configuredSumatraPath = String(
@@ -563,17 +593,29 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
     ).trim();
     const sumatraCandidates = [
         configuredSumatraPath,
+        path.join(
+            process.env.LOCALAPPDATA || "",
+            "SumatraPDF",
+            "SumatraPDF.exe",
+        ),
+        path.join(
+            process.env.PROGRAMFILES || "",
+            "SumatraPDF",
+            "SumatraPDF.exe",
+        ),
+        path.join(
+            process.env["PROGRAMFILES(X86)"] || "",
+            "SumatraPDF",
+            "SumatraPDF.exe",
+        ),
         "SumatraPDF.exe",
         "sumatrapdf.exe",
     ].filter(Boolean);
 
-    for (const candidate of sumatraCandidates) {
-        const check = await runCommand(candidate, ["-v"]);
-        if (!check.success) {
-            continue;
-        }
+    const sumatraExecutable = await resolveWindowsExecutable(sumatraCandidates);
 
-        const printResult = await runCommand(candidate, [
+    if (sumatraExecutable) {
+        const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
             "-silent",
@@ -590,23 +632,64 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         }
     }
 
-    const safePrinterName = escapePowerShellSingleQuoted(printerName);
-    const safePdfPath = escapePowerShellSingleQuoted(pdfFilePath);
-    const printToScript = `$f='${safePdfPath}'; $p='${safePrinterName}'; $proc=Start-Process -FilePath $f -Verb PrintTo -ArgumentList ('"'+$p+'"') -PassThru; if ($proc) { Wait-Process -Id $proc.Id -Timeout 45 -ErrorAction SilentlyContinue; Write-Output 'PrintTo command triggered.'; }`;
-    const printToResult = await runPowerShell(printToScript);
+    const configuredAdobeReaderPath = String(
+        process.env.ADOBE_READER_PATH || "",
+    ).trim();
+    const adobeCandidates = [
+        configuredAdobeReaderPath,
+        path.join(
+            process.env.PROGRAMFILES || "",
+            "Adobe",
+            "Acrobat DC",
+            "Acrobat",
+            "Acrobat.exe",
+        ),
+        path.join(
+            process.env["PROGRAMFILES(X86)"] || "",
+            "Adobe",
+            "Acrobat Reader DC",
+            "Reader",
+            "AcroRd32.exe",
+        ),
+        path.join(
+            process.env.PROGRAMFILES || "",
+            "Adobe",
+            "Acrobat Reader DC",
+            "Reader",
+            "AcroRd32.exe",
+        ),
+        "AcroRd32.exe",
+        "Acrobat.exe",
+    ].filter(Boolean);
 
-    if (printToResult.success) {
-        return {
-            success: true,
-            strategy: "powershell-printto",
-            details: printToResult,
-        };
+    const adobeExecutable = await resolveWindowsExecutable(adobeCandidates);
+
+    if (adobeExecutable) {
+        const printResult = await runCommand(adobeExecutable, [
+            "/h",
+            "/t",
+            pdfFilePath,
+            printerName,
+        ]);
+
+        if (printResult.success) {
+            return {
+                success: true,
+                strategy: "adobe-reader-cli",
+                details: printResult,
+            };
+        }
     }
 
     return {
         success: false,
         strategy: "none",
-        details: printToResult,
+        details: {
+            stdout: "",
+            stderr: "",
+            error:
+                "No silent PDF printer was found on Windows. Install SumatraPDF or Adobe Reader, or set SUMATRA_PDF_PATH / ADOBE_READER_PATH.",
+        },
     };
 }
 
