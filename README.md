@@ -79,6 +79,34 @@ For development with auto-restart:
 npm run dev
 ```
 
+### Windows Auto Start
+If the Windows machine should start the service automatically after login, use the helper scripts in this repository:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-autostart.ps1
+```
+
+If PowerShell script execution is blocked on that machine, use the VBScript installer instead:
+
+```bat
+wscript .\install-autostart.vbs
+```
+
+You can also just double-click `install-autostart.vbs` in Explorer.
+
+What this does:
+- `start-windows.cmd` starts the app with `npm start` and writes output to `logs\service.log`
+- `start-windows-hidden.vbs` launches that command without leaving a visible console window open
+- `install-autostart.ps1` creates a shortcut in the current user's Windows Startup folder
+- `install-autostart.vbs` does the same thing without depending on PowerShell execution policy
+
+Prerequisites on the Windows machine:
+- Node.js and npm must already be installed and available in `PATH`
+- The project folder must stay in the same location after autostart is installed
+- The user account must log in to Windows, because the Startup folder runs after login
+
+To remove autostart later, delete `localPrintZebra.lnk` from the Windows Startup folder.
+
 ### Windows Silent Printing
 When `PRINT_FORMAT=barcode` is used on Windows, the service now avoids the Windows `PrintTo` fallback because it opens the default PDF viewer. For silent printing, install SumatraPDF or Adobe Reader on the Windows machine. SumatraPDF is preferred because it supports direct headless printing and exits automatically after the job is queued.
 
