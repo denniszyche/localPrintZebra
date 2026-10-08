@@ -9,6 +9,11 @@ const path = require("path");
 const os = require("os");
 const bwipjs = require("bwip-js");
 const PDFDocument = require("pdfkit");
+const {
+    PDFDocument: PDFLibDocument,
+    StandardFonts,
+    rgb,
+} = require("pdf-lib");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -305,6 +310,85 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
 
         doc.end();
     });
+}
+
+// Two-sided printing from template PDFs (pdfs/front.pdf + pdfs/back.pdf)
+const DUPLEX_TEMPLATES = process.env.DUPLEX_TEMPLATES === "true";
+const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(__dirname, "pdfs");
+const DUPLEX_RIBBON_COMBINATION =
+    process.env.DUPLEX_RIBBON_COMBINATION || "1FrontYmckoBackYmcko";
+
+async function embedImageAuto(pdfDoc, buffer) {
+    const isPng = buffer.slice(0, 4).toString("hex") === "89504e47";
+    return isPng ? pdfDoc.embedPng(buffer) : pdfDoc.embedJpg(buffer);
+}
+
+/**
+ * Build a 2-page PDF: front template + database data (page 1), back template (page 2).
+ */
+async function generateDuplexTemplatePdf(cardNumber, photoBuffer = null) {
+    const safeNumber = String(cardNumber || "").trim();
+    const barcodePng = await generateBarcodePng(safeNumber);
+
+    const frontDoc = await PDFLibDocument.load(
+        fs.readFileSync(path.join(TEMPLATE_DIR, "front.pdf")),
+    );
+    const backDoc = await PDFLibDocument.load(
+        fs.readFileSync(path.join(TEMPLATE_DIR, "back.pdf")),
+    );
+
+    const out = await PDFLibDocument.create();
+    const [frontPage] = await out.copyPages(frontDoc, [0]);
+    const [backPage] = await out.copyPages(backDoc, [0]);
+    out.addPage(frontPage);
+    out.addPage(backPage);
+
+    const { width, height } = frontPage.getSize();
+    const font = await out.embedFont(StandardFonts.HelveticaBold);
+    const black = rgb(0, 0, 0);
+
+    // pdf-lib origin is bottom-left; y values below are measured from the top.
+    const fromTop = (y, h = 0) => height - y - h;
+
+    if (photoBuffer) {
+        try {
+            const photo = await embedImageAuto(out, photoBuffer);
+            const box = { x: 25, y: 18, w: 106, h: 106 };
+            const scale = Math.min(box.w / photo.width, box.h / photo.height);
+            const w = photo.width * scale;
+            const h = photo.height * scale;
+            frontPage.drawImage(photo, {
+                x: box.x + (box.w - w) / 2,
+                y: fromTop(box.y + (box.h - h) / 2, h),
+                width: w,
+                height: h,
+            });
+        } catch (err) {
+            console.warn(`⚠️  Photo could not be embedded: ${err.message}`);
+        }
+    }
+
+    const fontSize = 13;
+    const textWidth = font.widthOfTextAtSize(safeNumber, fontSize);
+    frontPage.drawText(safeNumber, {
+        x: (width - textWidth) / 2,
+        y: fromTop(138),
+        size: fontSize,
+        font,
+        color: black,
+    });
+
+    const barcode = await out.embedPng(barcodePng);
+    const barcodeW = width - 40;
+    const barcodeH = 34;
+    frontPage.drawImage(barcode, {
+        x: 20,
+        y: fromTop(148, barcodeH),
+        width: barcodeW,
+        height: barcodeH,
+    });
+
+    return Buffer.from(await out.save());
 }
 
 /**
@@ -712,10 +796,9 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
                 }
             }
 
-            const pdfBuffer = await generateBarcodeCardPdf(
-                safeCardNumber,
-                photoBuffer,
-            );
+            const pdfBuffer = DUPLEX_TEMPLATES
+                ? await generateDuplexTemplatePdf(safeCardNumber, photoBuffer)
+                : await generateBarcodeCardPdf(safeCardNumber, photoBuffer);
             const tempFile = path.join(
                 os.tmpdir(),
                 `zebra_barcode_${Date.now()}.pdf`,
@@ -777,7 +860,10 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
 
                 let cmd;
                 if (os.platform() === "darwin" || os.platform() === "linux") {
-                    cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper "${tempFile}"`;
+                    const duplexOpts = DUPLEX_TEMPLATES
+                        ? ` -o Orientation=1Portrait -o DualSidePrinting=1true -o RibbonCombination=${DUPLEX_RIBBON_COMBINATION}`
+                        : "";
+                    cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper${duplexOpts} "${tempFile}"`;
                 } else {
                     cmd = `lp -d "${printerName}" "${tempFile}"`;
                 }
