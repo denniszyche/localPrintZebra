@@ -404,7 +404,8 @@ function getAvailablePrinters() {
             cmd = "LC_ALL=C lpstat -p | awk '/^printer / {print $2}'";
         } else if (os.platform() === "win32") {
             // Windows
-            cmd = "wmic printer get name";
+            cmd =
+                'powershell -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name"';
         } else {
             // Linux
             cmd = "lpstat -p | awk '{print $2}'";
@@ -702,6 +703,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
+            ...(DUPLEX_TEMPLATES ? ["-print-settings", "duplexlong"] : []),
             "-silent",
             "-exit-on-print",
             pdfFilePath,
