@@ -317,6 +317,8 @@ const DUPLEX_TEMPLATES = process.env.DUPLEX_TEMPLATES === "true";
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(__dirname, "pdfs");
 const DUPLEX_RIBBON_COMBINATION =
     process.env.DUPLEX_RIBBON_COMBINATION || "1FrontYmckoBackYmcko";
+// Windows only: duplexlong, duplexshort or simplex, passed to SumatraPDF.
+const SUMATRA_DUPLEX = process.env.SUMATRA_DUPLEX || "duplexlong";
 
 async function embedImageAuto(pdfDoc, buffer) {
     const isPng = buffer.slice(0, 4).toString("hex") === "89504e47";
@@ -705,7 +707,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
             "-print-to",
             printerName,
             ...(DUPLEX_TEMPLATES
-                ? ["-print-settings", "duplexlong,noscale"]
+                ? ["-print-settings", `${SUMATRA_DUPLEX},noscale`]
                 : []),
             "-silent",
             "-exit-on-print",
