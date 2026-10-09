@@ -252,3 +252,5 @@ node make-test-pdf.js
 
 
 & "$env:LOCALAPPDATA\SumatraPDF\SumatraPDF.exe" "$env:TEMP\two-page.pdf"
+
+rundll32 printui.dll,PrintUIEntry /o /n "Zebra ZC300 USB Card Printer"
