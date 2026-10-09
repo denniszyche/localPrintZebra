@@ -246,3 +246,9 @@ curl http://192.168.0.244:3001/health
 ```
 
 3. If you configured `TRUSTED_CLIENT_IPS`, ensure it includes your backend server IP exactly.
+
+
+node -e "const {PDFDocument}=require('pdf-lib');const fs=require('fs');(async()=>{const o=await PDFDocument.create();for(const f of ['front','back']){const d=await PDFDocument.load(fs.readFileSync('pdfs/'+f+'.pdf'));const [p]=await o.copyPages(d,[0]);o.addPage(p);}fs.writeFileSync(process.env.TEMP+'\\two-page.pdf',await o.save());})()"
+
+
+& "$env:LOCALAPPDATA\SumatraPDF\SumatraPDF.exe" "$env:TEMP\two-page.pdf"
