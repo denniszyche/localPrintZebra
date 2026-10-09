@@ -707,7 +707,12 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
             "-print-to",
             printerName,
             ...(DUPLEX_TEMPLATES
-                ? ["-print-settings", `${SUMATRA_DUPLEX},noscale`]
+                ? [
+                      "-print-settings",
+                      SUMATRA_DUPLEX === "none"
+                          ? "noscale"
+                          : `${SUMATRA_DUPLEX},noscale`,
+                  ]
                 : []),
             "-silent",
             "-exit-on-print",
