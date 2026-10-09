@@ -703,8 +703,9 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
-            // Duplex comes from the driver's Printing Defaults; Sumatra's duplex flag overrides it.
-            ...(DUPLEX_TEMPLATES ? ["-print-settings", "noscale"] : []),
+            ...(DUPLEX_TEMPLATES
+                ? ["-print-settings", "duplexlong,noscale"]
+                : []),
             "-silent",
             "-exit-on-print",
             pdfFilePath,
