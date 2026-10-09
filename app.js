@@ -319,6 +319,10 @@ const DUPLEX_RIBBON_COMBINATION =
     process.env.DUPLEX_RIBBON_COMBINATION || "1FrontYmckoBackYmcko";
 // Windows only: duplexlong, duplexshort or simplex, passed to SumatraPDF.
 const SUMATRA_DUPLEX = process.env.SUMATRA_DUPLEX || "duplexlong";
+// Windows only: "adobe" skips SumatraPDF and prints through Adobe's driver-aware CLI.
+const PDF_PRINT_TOOL = String(process.env.PDF_PRINT_TOOL || "")
+    .trim()
+    .toLowerCase();
 
 async function embedImageAuto(pdfDoc, buffer) {
     const isPng = buffer.slice(0, 4).toString("hex") === "89504e47";
@@ -702,7 +706,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
     const sumatraExecutable = await resolveWindowsExecutable(sumatraCandidates);
     let sumatraFailure = "SumatraPDF.exe was not found";
 
-    if (sumatraExecutable) {
+    if (sumatraExecutable && PDF_PRINT_TOOL !== "adobe") {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
