@@ -698,6 +698,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
     ].filter(Boolean);
 
     const sumatraExecutable = await resolveWindowsExecutable(sumatraCandidates);
+    let sumatraFailure = "SumatraPDF.exe was not found";
 
     if (sumatraExecutable) {
         const printResult = await runCommand(sumatraExecutable, [
@@ -718,6 +719,8 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
                 details: printResult,
             };
         }
+
+        sumatraFailure = `Sumatra failed (code ${printResult.code}): ${[printResult.stderr, printResult.stdout, printResult.error].filter(Boolean).join(" | ")}`;
     }
 
     const configuredAdobeReaderPath = String(
@@ -775,8 +778,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         details: {
             stdout: "",
             stderr: "",
-            error:
-                "No silent PDF printer was found on Windows. Install SumatraPDF or Adobe Reader, or set SUMATRA_PDF_PATH / ADOBE_READER_PATH.",
+            error: `${sumatraFailure}. No other silent PDF printer worked. Install SumatraPDF or set SUMATRA_PDF_PATH / ADOBE_READER_PATH.`,
         },
     };
 }
