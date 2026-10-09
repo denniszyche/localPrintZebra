@@ -1084,6 +1084,53 @@ app.post("/test", async (req, res) => {
 });
 
 /**
+ * Duplex test - 2-page CR80 PDF with only FRONT / BACK text.
+ */
+app.post("/test-duplex", async (req, res) => {
+    try {
+        if (os.platform() !== "win32") {
+            return res.status(400).json({
+                success: false,
+                error: "test-duplex is only implemented for Windows",
+            });
+        }
+
+        const doc = await PDFLibDocument.create();
+        const font = await doc.embedFont(StandardFonts.HelveticaBold);
+        for (const label of ["FRONT", "BACK"]) {
+            const page = doc.addPage([153, 242.64]);
+            page.drawText(label, {
+                x: 25,
+                y: 110,
+                size: 24,
+                font,
+                color: rgb(0, 0, 0),
+            });
+        }
+
+        const tempFile = path.join(
+            os.tmpdir(),
+            `zebra_duplex_test_${Date.now()}.pdf`,
+        );
+        fs.writeFileSync(tempFile, Buffer.from(await doc.save()));
+
+        const result = await printPdfOnWindows(PRINTER_NAME, tempFile);
+        fs.unlink(tempFile, () => {});
+
+        return res.status(result.success ? 200 : 500).json({
+            success: result.success,
+            strategy: result.strategy,
+            details: result.details,
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            error: error.message,
+        });
+    }
+});
+
+/**
  * Cleanup endpoint - clears pending jobs and resets spooler/queue.
  */
 app.post("/cleanup", async (req, res) => {
