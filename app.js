@@ -285,8 +285,8 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
                 align: "center",
             });
 
-            doc.image(barcodePng, contentX + 6, 58, {
-                fit: [contentW - 12, 50],
+            doc.image(barcodePng, contentX + 16, 62, {
+                fit: [contentW - 32, 40],
                 align: "center",
                 valign: "center",
             });
@@ -298,10 +298,10 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
                 align: "center",
             });
 
-            const barcodeWidth = 165;
-            const barcodeHeight = 50;
+            const barcodeWidth = 130;
+            const barcodeHeight = 40;
             const barcodeX = (cardWidthPt - barcodeWidth) / 2;
-            const barcodeY = 58;
+            const barcodeY = 62;
             doc.image(barcodePng, barcodeX, barcodeY, {
                 width: barcodeWidth,
                 height: barcodeHeight,
@@ -319,10 +319,6 @@ const DUPLEX_RIBBON_COMBINATION =
     process.env.DUPLEX_RIBBON_COMBINATION || "1FrontYmckoBackYmcko";
 // Windows only: duplexlong, duplexshort or simplex, passed to SumatraPDF.
 const SUMATRA_DUPLEX = process.env.SUMATRA_DUPLEX || "duplexlong";
-// Windows only: "adobe" skips SumatraPDF and prints through Adobe's driver-aware CLI.
-const PDF_PRINT_TOOL = String(process.env.PDF_PRINT_TOOL || "")
-    .trim()
-    .toLowerCase();
 
 async function embedImageAuto(pdfDoc, buffer) {
     const isPng = buffer.slice(0, 4).toString("hex") === "89504e47";
@@ -675,8 +671,7 @@ async function cleanupPrinterQueue(printerName) {
 }
 
 /**
- * Print a generated PDF on Windows.
- * Strategy: silent CLI tools only to avoid opening a PDF viewer window.
+ * Print a generated PDF on Windows silently through SumatraPDF.
  */
 async function printPdfOnWindows(printerName, pdfFilePath) {
     const configuredSumatraPath = String(
@@ -706,7 +701,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
     const sumatraExecutable = await resolveWindowsExecutable(sumatraCandidates);
     let sumatraFailure = "SumatraPDF.exe was not found";
 
-    if (sumatraExecutable && PDF_PRINT_TOOL !== "adobe") {
+    if (sumatraExecutable) {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
@@ -734,62 +729,13 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         sumatraFailure = `Sumatra failed (code ${printResult.code}): ${[printResult.stderr, printResult.stdout, printResult.error].filter(Boolean).join(" | ")}`;
     }
 
-    const configuredAdobeReaderPath = String(
-        process.env.ADOBE_READER_PATH || "",
-    ).trim();
-    const adobeCandidates = [
-        configuredAdobeReaderPath,
-        path.join(
-            process.env.PROGRAMFILES || "",
-            "Adobe",
-            "Acrobat DC",
-            "Acrobat",
-            "Acrobat.exe",
-        ),
-        path.join(
-            process.env["PROGRAMFILES(X86)"] || "",
-            "Adobe",
-            "Acrobat Reader DC",
-            "Reader",
-            "AcroRd32.exe",
-        ),
-        path.join(
-            process.env.PROGRAMFILES || "",
-            "Adobe",
-            "Acrobat Reader DC",
-            "Reader",
-            "AcroRd32.exe",
-        ),
-        "AcroRd32.exe",
-        "Acrobat.exe",
-    ].filter(Boolean);
-
-    const adobeExecutable = await resolveWindowsExecutable(adobeCandidates);
-
-    if (adobeExecutable) {
-        const printResult = await runCommand(adobeExecutable, [
-            "/h",
-            "/t",
-            pdfFilePath,
-            printerName,
-        ]);
-
-        if (printResult.success) {
-            return {
-                success: true,
-                strategy: "adobe-reader-cli",
-                details: printResult,
-            };
-        }
-    }
-
     return {
         success: false,
         strategy: "none",
         details: {
             stdout: "",
             stderr: "",
-            error: `${sumatraFailure}. No other silent PDF printer worked. Install SumatraPDF or set SUMATRA_PDF_PATH / ADOBE_READER_PATH.`,
+            error: `${sumatraFailure}. Install SumatraPDF or set SUMATRA_PDF_PATH.`,
         },
     };
 }
@@ -1077,53 +1023,6 @@ app.post("/test", async (req, res) => {
         });
     } catch (error) {
         res.status(500).json({
-            success: false,
-            error: error.message,
-        });
-    }
-});
-
-/**
- * Duplex test - 2-page CR80 PDF with only FRONT / BACK text.
- */
-app.post("/test-duplex", async (req, res) => {
-    try {
-        if (os.platform() !== "win32") {
-            return res.status(400).json({
-                success: false,
-                error: "test-duplex is only implemented for Windows",
-            });
-        }
-
-        const doc = await PDFLibDocument.create();
-        const font = await doc.embedFont(StandardFonts.HelveticaBold);
-        for (const label of ["FRONT", "BACK"]) {
-            const page = doc.addPage([153, 242.64]);
-            page.drawText(label, {
-                x: 25,
-                y: 110,
-                size: 24,
-                font,
-                color: rgb(0, 0, 0),
-            });
-        }
-
-        const tempFile = path.join(
-            os.tmpdir(),
-            `zebra_duplex_test_${Date.now()}.pdf`,
-        );
-        fs.writeFileSync(tempFile, Buffer.from(await doc.save()));
-
-        const result = await printPdfOnWindows(PRINTER_NAME, tempFile);
-        fs.unlink(tempFile, () => {});
-
-        return res.status(result.success ? 200 : 500).json({
-            success: result.success,
-            strategy: result.strategy,
-            details: result.details,
-        });
-    } catch (error) {
-        return res.status(500).json({
             success: false,
             error: error.message,
         });
