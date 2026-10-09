@@ -314,6 +314,9 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
 
 // Two-sided printing from template PDFs (pdfs/front.pdf + pdfs/back.pdf)
 const DUPLEX_TEMPLATES = process.env.DUPLEX_TEMPLATES === "true";
+// Single-sided print on the front template design only (pdfs/front.pdf)
+const FRONT_TEMPLATE = process.env.FRONT_TEMPLATE === "true";
+const USE_TEMPLATES = DUPLEX_TEMPLATES || FRONT_TEMPLATE;
 const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(__dirname, "pdfs");
 const DUPLEX_RIBBON_COMBINATION =
     process.env.DUPLEX_RIBBON_COMBINATION || "1FrontYmckoBackYmcko";
@@ -326,24 +329,31 @@ async function embedImageAuto(pdfDoc, buffer) {
 }
 
 /**
- * Build a 2-page PDF: front template + database data (page 1), back template (page 2).
+ * Build the card PDF from the front template + database data, plus the back template when includeBack is set.
  */
-async function generateDuplexTemplatePdf(cardNumber, photoBuffer = null) {
+async function generateDuplexTemplatePdf(
+    cardNumber,
+    photoBuffer = null,
+    includeBack = true,
+) {
     const safeNumber = String(cardNumber || "").trim();
     const barcodePng = await generateBarcodePng(safeNumber);
 
     const frontDoc = await PDFLibDocument.load(
         fs.readFileSync(path.join(TEMPLATE_DIR, "front.pdf")),
     );
-    const backDoc = await PDFLibDocument.load(
-        fs.readFileSync(path.join(TEMPLATE_DIR, "back.pdf")),
-    );
 
     const out = await PDFLibDocument.create();
     const [frontPage] = await out.copyPages(frontDoc, [0]);
-    const [backPage] = await out.copyPages(backDoc, [0]);
     out.addPage(frontPage);
-    out.addPage(backPage);
+
+    if (includeBack) {
+        const backDoc = await PDFLibDocument.load(
+            fs.readFileSync(path.join(TEMPLATE_DIR, "back.pdf")),
+        );
+        const [backPage] = await out.copyPages(backDoc, [0]);
+        out.addPage(backPage);
+    }
 
     const { width, height } = frontPage.getSize();
     const font = await out.embedFont(StandardFonts.HelveticaBold);
@@ -381,10 +391,10 @@ async function generateDuplexTemplatePdf(cardNumber, photoBuffer = null) {
     });
 
     const barcode = await out.embedPng(barcodePng);
-    const barcodeW = width - 40;
-    const barcodeH = 34;
+    const barcodeW = 90;
+    const barcodeH = 28;
     frontPage.drawImage(barcode, {
-        x: 20,
+        x: (width - barcodeW) / 2,
         y: fromTop(148, barcodeH),
         width: barcodeW,
         height: barcodeH,
@@ -705,12 +715,12 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
-            ...(DUPLEX_TEMPLATES
+            ...(USE_TEMPLATES
                 ? [
                       "-print-settings",
-                      SUMATRA_DUPLEX === "none"
-                          ? "noscale"
-                          : `${SUMATRA_DUPLEX},noscale`,
+                      DUPLEX_TEMPLATES && SUMATRA_DUPLEX !== "none"
+                          ? `${SUMATRA_DUPLEX},noscale`
+                          : "noscale",
                   ]
                 : []),
             "-silent",
@@ -759,8 +769,12 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
                 }
             }
 
-            const pdfBuffer = DUPLEX_TEMPLATES
-                ? await generateDuplexTemplatePdf(safeCardNumber, photoBuffer)
+            const pdfBuffer = USE_TEMPLATES
+                ? await generateDuplexTemplatePdf(
+                      safeCardNumber,
+                      photoBuffer,
+                      DUPLEX_TEMPLATES,
+                  )
                 : await generateBarcodeCardPdf(safeCardNumber, photoBuffer);
             const tempFile = path.join(
                 os.tmpdir(),
