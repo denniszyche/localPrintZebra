@@ -703,7 +703,9 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
-            ...(DUPLEX_TEMPLATES ? ["-print-settings", "duplexlong"] : []),
+            ...(DUPLEX_TEMPLATES
+                ? ["-print-settings", "duplexlong,noscale"]
+                : []),
             "-silent",
             "-exit-on-print",
             pdfFilePath,
