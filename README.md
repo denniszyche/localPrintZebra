@@ -246,3 +246,11 @@ curl http://192.168.0.244:3001/health
 ```
 
 3. If you configured `TRUSTED_CLIENT_IPS`, ensure it includes your backend server IP exactly.
+
+
+node make-test-pdf.js
+
+
+& "$env:LOCALAPPDATA\SumatraPDF\SumatraPDF.exe" "$env:TEMP\two-page.pdf"
+
+rundll32 printui.dll,PrintUIEntry /o /n "Zebra ZC300 USB Card Printer"

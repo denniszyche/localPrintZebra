@@ -9,6 +9,11 @@ const path = require("path");
 const os = require("os");
 const bwipjs = require("bwip-js");
 const PDFDocument = require("pdfkit");
+const {
+    PDFDocument: PDFLibDocument,
+    StandardFonts,
+    rgb,
+} = require("pdf-lib");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -280,8 +285,8 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
                 align: "center",
             });
 
-            doc.image(barcodePng, contentX + 6, 58, {
-                fit: [contentW - 12, 50],
+            doc.image(barcodePng, contentX + 16, 62, {
+                fit: [contentW - 32, 40],
                 align: "center",
                 valign: "center",
             });
@@ -293,10 +298,10 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
                 align: "center",
             });
 
-            const barcodeWidth = 165;
-            const barcodeHeight = 50;
+            const barcodeWidth = 130;
+            const barcodeHeight = 40;
             const barcodeX = (cardWidthPt - barcodeWidth) / 2;
-            const barcodeY = 58;
+            const barcodeY = 62;
             doc.image(barcodePng, barcodeX, barcodeY, {
                 width: barcodeWidth,
                 height: barcodeHeight,
@@ -305,6 +310,256 @@ async function generateBarcodeCardPdf(cardNumber, photoBuffer = null) {
 
         doc.end();
     });
+}
+
+// Two-sided printing from template PDFs (pdfs/front.pdf + pdfs/back.pdf)
+const DUPLEX_TEMPLATES = process.env.DUPLEX_TEMPLATES === "true";
+// Single-sided print on the front template design only (pdfs/front.pdf)
+const FRONT_TEMPLATE = process.env.FRONT_TEMPLATE === "true";
+const USE_TEMPLATES = DUPLEX_TEMPLATES || FRONT_TEMPLATE;
+const TEMPLATE_DIR = process.env.TEMPLATE_DIR || path.join(__dirname, "pdfs");
+const DUPLEX_RIBBON_COMBINATION =
+    process.env.DUPLEX_RIBBON_COMBINATION || "1FrontYmckoBackYmcko";
+// Windows only: duplexlong, duplexshort or simplex, passed to SumatraPDF.
+const SUMATRA_DUPLEX = process.env.SUMATRA_DUPLEX || "duplexlong";
+
+async function embedImageAuto(pdfDoc, buffer) {
+    const isPng = buffer.slice(0, 4).toString("hex") === "89504e47";
+    return isPng ? pdfDoc.embedPng(buffer) : pdfDoc.embedJpg(buffer);
+}
+
+/**
+ * Resolve the template file for the front of the card.
+ * If type is given (e.g. "jovenes" or "jovenes-front"), it tries:
+ *   1. <sanitized>-front.pdf
+ *   2. <sanitized>.pdf
+ * Falls back to "front.pdf" if no type is given or the typed file doesn't exist.
+ */
+function resolveFrontTemplatePath(type) {
+    if (type) {
+        const clean = String(type)
+            .trim()
+            .toLowerCase()
+            .replace(/\.pdf$/i, "");
+        const baseName = clean.endsWith("-front") ? clean : `${clean}-front`;
+        const candidate1 = path.join(TEMPLATE_DIR, `${baseName}.pdf`);
+        if (fs.existsSync(candidate1)) return candidate1;
+
+        const candidate2 = path.join(TEMPLATE_DIR, `${clean}.pdf`);
+        if (fs.existsSync(candidate2)) return candidate2;
+
+        console.warn(
+            `⚠️  Template for type "${type}" not found (${candidate1}), falling back to front.pdf`,
+        );
+    }
+    return path.join(TEMPLATE_DIR, "front.pdf");
+}
+
+/**
+ * Resolve the template file for the back of the card.
+ * If type is given (e.g. "jovenes" or "jovenes-back"), it tries:
+ *   1. <sanitized>-back.pdf
+ *   2. <sanitized>.pdf
+ * Falls back to "back.pdf" if no type is given or the typed file doesn't exist.
+ */
+function resolveBackTemplatePath(type) {
+    if (type) {
+        const clean = String(type)
+            .trim()
+            .toLowerCase()
+            .replace(/\.pdf$/i, "");
+        const baseName = clean.endsWith("-back") ? clean : `${clean}-back`;
+        const candidate1 = path.join(TEMPLATE_DIR, `${baseName}.pdf`);
+        if (fs.existsSync(candidate1)) return candidate1;
+
+        const candidate2 = path.join(TEMPLATE_DIR, `${clean}.pdf`);
+        if (fs.existsSync(candidate2)) return candidate2;
+
+        console.warn(
+            `⚠️  Back template for type "${type}" not found (${candidate1}), falling back to back.pdf`,
+        );
+    }
+    return path.join(TEMPLATE_DIR, "back.pdf");
+}
+
+/**
+ * Send a raw PDF file through the printer driver (used for standalone back print).
+ */
+function sendPdfFileToUSBPrinter(printerName, pdfFilePath) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            if (os.platform() === "win32") {
+                const winResult = await printPdfOnWindows(
+                    printerName,
+                    pdfFilePath,
+                );
+                if (!winResult.success) {
+                    const detailText = [
+                        winResult.details && winResult.details.stdout,
+                        winResult.details && winResult.details.stderr,
+                        winResult.details && winResult.details.error,
+                    ]
+                        .filter(Boolean)
+                        .join(" | ");
+                    reject(
+                        new Error(
+                            `Back print command failed on Windows: ${detailText || "no additional details"}`,
+                        ),
+                    );
+                    return;
+                }
+                const output =
+                    `${winResult.details.stdout || ""}${winResult.details.stderr || ""}`.trim();
+                console.log(
+                    `✓ Back card print job sent (win32, ${winResult.strategy})`,
+                );
+                resolve({
+                    success: true,
+                    method: "usb-pdf-back-win32",
+                    printStrategy: winResult.strategy,
+                    commandOutput: output,
+                });
+                return;
+            }
+
+            let cmd;
+            if (os.platform() === "darwin" || os.platform() === "linux") {
+                cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper -o Orientation=1Portrait "${pdfFilePath}"`;
+            } else {
+                cmd = `lp -d "${printerName}" "${pdfFilePath}"`;
+            }
+
+            exec(cmd, (error, stdout, stderr) => {
+                if (error) {
+                    reject(
+                        new Error(
+                            `Back print command failed: ${error.message}`,
+                        ),
+                    );
+                    return;
+                }
+
+                const output = `${stdout || ""}${stderr || ""}`.trim();
+                const normalizedOutput = output.replace(/[–—−]/g, "-");
+                const jobMatch = normalizedOutput.match(
+                    /\b([A-Za-z0-9_\-]+-\d+)\b/,
+                );
+                const jobId = jobMatch ? jobMatch[1] : null;
+
+                console.log(
+                    "✓ Back card print job sent",
+                    jobId ? `(${jobId})` : "",
+                );
+                resolve({
+                    success: true,
+                    method: "usb-pdf-back",
+                    jobId,
+                    commandOutput: output,
+                });
+            });
+        } catch (err) {
+            reject(err);
+        }
+    });
+}
+
+/**
+ * Build the card PDF from the front template + database data, plus the back template when includeBack is set.
+ */
+async function generateDuplexTemplatePdf({
+    cardNumber,
+    userName = "",
+    photoBuffer = null,
+    templateType = null,
+    includeBack = true,
+}) {
+    const safeNumber = String(cardNumber || "").trim();
+    const safeName = String(userName || "").trim();
+    const barcodePng = await generateBarcodePng(safeNumber);
+
+    const frontTemplatePath = resolveFrontTemplatePath(templateType);
+    const frontDoc = await PDFLibDocument.load(
+        fs.readFileSync(frontTemplatePath),
+    );
+
+    const out = await PDFLibDocument.create();
+    const [frontPage] = await out.copyPages(frontDoc, [0]);
+    out.addPage(frontPage);
+
+    if (includeBack) {
+        const backDoc = await PDFLibDocument.load(
+            fs.readFileSync(path.join(TEMPLATE_DIR, "back.pdf")),
+        );
+        const [backPage] = await out.copyPages(backDoc, [0]);
+        out.addPage(backPage);
+    }
+
+    const { width, height } = frontPage.getSize();
+    const boldFont = await out.embedFont(StandardFonts.HelveticaBold);
+    const regularFont = await out.embedFont(StandardFonts.Helvetica);
+    const black = rgb(0, 0, 0);
+
+    // pdf-lib origin is bottom-left; y values below are measured from the top.
+    const fromTop = (y, h = 0) => height - y - h;
+
+    if (photoBuffer) {
+        try {
+            const photo = await embedImageAuto(out, photoBuffer);
+            const box = { x: 28, y: 14, w: 100, h: 100 };
+            const scale = Math.min(box.w / photo.width, box.h / photo.height);
+            const w = photo.width * scale;
+            const h = photo.height * scale;
+            frontPage.drawImage(photo, {
+                x: box.x + (box.w - w) / 2,
+                y: fromTop(box.y + (box.h - h) / 2, h),
+                width: w,
+                height: h,
+            });
+        } catch (err) {
+            console.warn(`⚠️  Photo could not be embedded: ${err.message}`);
+        }
+    }
+
+    // 1. userName where the card number was (centered, bold)
+    // If no userName is provided, fall back to safeNumber
+    const displayText = safeName || safeNumber;
+    const nameFontSize = 12;
+    const nameWidth = boldFont.widthOfTextAtSize(displayText, nameFontSize);
+    frontPage.drawText(displayText, {
+        x: (width - nameWidth) / 2,
+        y: fromTop(128),
+        size: nameFontSize,
+        font: boldFont,
+        color: black,
+    });
+
+    // 2. Barcode
+    const barcode = await out.embedPng(barcodePng);
+    const barcodeW = 100;
+    const barcodeH = 26;
+    const barcodeTop = 138;
+    frontPage.drawImage(barcode, {
+        x: (width - barcodeW) / 2,
+        y: fromTop(barcodeTop, barcodeH),
+        width: barcodeW,
+        height: barcodeH,
+    });
+
+    // 3. cardNumber very small under the barcode (only if userName was shown above)
+    // If userName was empty, the number is already above the barcode.
+    if (safeName && safeNumber) {
+        const numberFontSize = 7;
+        const numWidth = regularFont.widthOfTextAtSize(safeNumber, numberFontSize);
+        frontPage.drawText(safeNumber, {
+            x: (width - numWidth) / 2,
+            y: fromTop(barcodeTop + barcodeH + 8),
+            size: numberFontSize,
+            font: regularFont,
+            color: black,
+        });
+    }
+
+    return Buffer.from(await out.save());
 }
 
 /**
@@ -320,7 +575,8 @@ function getAvailablePrinters() {
             cmd = "LC_ALL=C lpstat -p | awk '/^printer / {print $2}'";
         } else if (os.platform() === "win32") {
             // Windows
-            cmd = "wmic printer get name";
+            cmd =
+                'powershell -NoProfile -Command "Get-Printer | Select-Object -ExpandProperty Name"';
         } else {
             // Linux
             cmd = "lpstat -p | awk '{print $2}'";
@@ -584,8 +840,7 @@ async function cleanupPrinterQueue(printerName) {
 }
 
 /**
- * Print a generated PDF on Windows.
- * Strategy: silent CLI tools only to avoid opening a PDF viewer window.
+ * Print a generated PDF on Windows silently through SumatraPDF.
  */
 async function printPdfOnWindows(printerName, pdfFilePath) {
     const configuredSumatraPath = String(
@@ -613,11 +868,20 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
     ].filter(Boolean);
 
     const sumatraExecutable = await resolveWindowsExecutable(sumatraCandidates);
+    let sumatraFailure = "SumatraPDF.exe was not found";
 
     if (sumatraExecutable) {
         const printResult = await runCommand(sumatraExecutable, [
             "-print-to",
             printerName,
+            ...(USE_TEMPLATES
+                ? [
+                      "-print-settings",
+                      DUPLEX_TEMPLATES && SUMATRA_DUPLEX !== "none"
+                          ? `${SUMATRA_DUPLEX},noscale`
+                          : "noscale",
+                  ]
+                : []),
             "-silent",
             "-exit-on-print",
             pdfFilePath,
@@ -630,55 +894,8 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
                 details: printResult,
             };
         }
-    }
 
-    const configuredAdobeReaderPath = String(
-        process.env.ADOBE_READER_PATH || "",
-    ).trim();
-    const adobeCandidates = [
-        configuredAdobeReaderPath,
-        path.join(
-            process.env.PROGRAMFILES || "",
-            "Adobe",
-            "Acrobat DC",
-            "Acrobat",
-            "Acrobat.exe",
-        ),
-        path.join(
-            process.env["PROGRAMFILES(X86)"] || "",
-            "Adobe",
-            "Acrobat Reader DC",
-            "Reader",
-            "AcroRd32.exe",
-        ),
-        path.join(
-            process.env.PROGRAMFILES || "",
-            "Adobe",
-            "Acrobat Reader DC",
-            "Reader",
-            "AcroRd32.exe",
-        ),
-        "AcroRd32.exe",
-        "Acrobat.exe",
-    ].filter(Boolean);
-
-    const adobeExecutable = await resolveWindowsExecutable(adobeCandidates);
-
-    if (adobeExecutable) {
-        const printResult = await runCommand(adobeExecutable, [
-            "/h",
-            "/t",
-            pdfFilePath,
-            printerName,
-        ]);
-
-        if (printResult.success) {
-            return {
-                success: true,
-                strategy: "adobe-reader-cli",
-                details: printResult,
-            };
-        }
+        sumatraFailure = `Sumatra failed (code ${printResult.code}): ${[printResult.stderr, printResult.stdout, printResult.error].filter(Boolean).join(" | ")}`;
     }
 
     return {
@@ -687,8 +904,7 @@ async function printPdfOnWindows(printerName, pdfFilePath) {
         details: {
             stdout: "",
             stderr: "",
-            error:
-                "No silent PDF printer was found on Windows. Install SumatraPDF or Adobe Reader, or set SUMATRA_PDF_PATH / ADOBE_READER_PATH.",
+            error: `${sumatraFailure}. Install SumatraPDF or set SUMATRA_PDF_PATH.`,
         },
     };
 }
@@ -712,10 +928,15 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
                 }
             }
 
-            const pdfBuffer = await generateBarcodeCardPdf(
-                safeCardNumber,
-                photoBuffer,
-            );
+            const pdfBuffer = USE_TEMPLATES
+                ? await generateDuplexTemplatePdf({
+                      cardNumber: safeCardNumber,
+                      userName: cardData.userName,
+                      photoBuffer,
+                      templateType: cardData.type,
+                      includeBack: DUPLEX_TEMPLATES,
+                  })
+                : await generateBarcodeCardPdf(safeCardNumber, photoBuffer);
             const tempFile = path.join(
                 os.tmpdir(),
                 `zebra_barcode_${Date.now()}.pdf`,
@@ -777,7 +998,10 @@ function sendBarcodeImageToUSBPrinter(printerName, cardData) {
 
                 let cmd;
                 if (os.platform() === "darwin" || os.platform() === "linux") {
-                    cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper "${tempFile}"`;
+                    const duplexOpts = DUPLEX_TEMPLATES
+                        ? ` -o Orientation=1Portrait -o DualSidePrinting=1true -o RibbonCombination=${DUPLEX_RIBBON_COMBINATION}`
+                        : "";
+                    cmd = `lp -d "${printerName}" -o PageSize=CR80 -o CardSource=1Feeder -o CardDestination=0Hopper${duplexOpts} "${tempFile}"`;
                 } else {
                     cmd = `lp -d "${printerName}" "${tempFile}"`;
                 }
@@ -928,6 +1152,8 @@ app.post("/print", async (req, res) => {
 
         console.log("📄 Print request received:", {
             cardNumber: cardData.cardNumber,
+            userName: cardData.userName,
+            type: cardData.type,
             timestamp: new Date().toISOString(),
         });
 
@@ -961,7 +1187,10 @@ app.post("/print", async (req, res) => {
 app.post("/test", async (req, res) => {
     try {
         const testCard = {
-            cardNumber: "TEST-" + Date.now(),
+            cardNumber: req.body.cardNumber || "TEST-" + Date.now(),
+            userName: req.body.userName || "Usuario de Prueba",
+            type: req.body.type || "jovenes",
+            photoUrl: req.body.photoUrl,
         };
         const result = await printCardData(testCard);
         res.json({
@@ -973,6 +1202,52 @@ app.post("/test", async (req, res) => {
             testData: testCard,
         });
     } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message,
+        });
+    }
+});
+
+/**
+ * Endpoint to print ONLY the back of the card.
+ * Receives the card type as a URL parameter (e.g. /print-library-card-back/jovenes).
+ * Matches against pdfs/<type>-back.pdf or pdfs/<type>.pdf (e.g. jovenes.pdf).
+ */
+app.post("/print-library-card-back/:type", async (req, res) => {
+    try {
+        const type = req.params.type;
+        console.log(`📄 Print card BACK request received for type: ${type}`);
+
+        if (CONNECTION_TYPE !== "usb") {
+            return res.status(400).json({
+                success: false,
+                error: "Back printing is only supported with CONNECTION_TYPE=usb",
+            });
+        }
+
+        const templatePath = resolveBackTemplatePath(type);
+        if (!fs.existsSync(templatePath)) {
+            return res.status(404).json({
+                success: false,
+                error: `Template not found for type: ${type}`,
+            });
+        }
+
+        console.log(`Using back template: ${templatePath}`);
+        const result = await sendPdfFileToUSBPrinter(PRINTER_NAME, templatePath);
+
+        res.json({
+            success: true,
+            message: "Card back sent to printer successfully",
+            method: result.method,
+            type,
+            template: path.basename(templatePath),
+            jobId: result.jobId || null,
+            printer: PRINTER_NAME,
+        });
+    } catch (error) {
+        console.error("❌ Print card back error:", error);
         res.status(500).json({
             success: false,
             error: error.message,
