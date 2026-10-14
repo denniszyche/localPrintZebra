@@ -13,6 +13,7 @@ const {
     PDFDocument: PDFLibDocument,
     StandardFonts,
     rgb,
+    degrees,
 } = require("pdf-lib");
 
 const app = express();
@@ -323,6 +324,38 @@ const DUPLEX_RIBBON_COMBINATION =
 // Windows only: duplexlong, duplexshort or simplex, passed to SumatraPDF.
 const SUMATRA_DUPLEX = process.env.SUMATRA_DUPLEX || "duplexlong";
 
+/**
+ * Read the EXIF orientation (1-8) from a JPEG buffer. Returns 1 when absent.
+ */
+function getJpegExifOrientation(buf) {
+    if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return 1;
+    let off = 2;
+    while (off + 4 < buf.length) {
+        if (buf[off] !== 0xff) return 1;
+        const marker = buf[off + 1];
+        const len = buf.readUInt16BE(off + 2);
+        if (marker === 0xe1 && buf.toString("ascii", off + 4, off + 8) === "Exif") {
+            const t = off + 10;
+            const le = buf.toString("ascii", t, t + 2) === "II";
+            const u16 = (o) => (le ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+            const u32 = (o) => (le ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+            const ifd = t + u32(t + 4);
+            const count = u16(ifd);
+            for (let i = 0; i < count; i++) {
+                const e = ifd + 2 + i * 12;
+                if (u16(e) === 0x0112) {
+                    const v = u16(e + 8);
+                    return v >= 1 && v <= 8 ? v : 1;
+                }
+            }
+            return 1;
+        }
+        if (marker === 0xda) return 1;
+        off += 2 + len;
+    }
+    return 1;
+}
+
 async function embedImageAuto(pdfDoc, buffer) {
     const isPng = buffer.slice(0, 4).toString("hex") === "89504e47";
     return isPng ? pdfDoc.embedPng(buffer) : pdfDoc.embedJpg(buffer);
@@ -511,15 +544,24 @@ async function generateDuplexTemplatePdf({
     if (photoBuffer) {
         try {
             const photo = await embedImageAuto(out, photoBuffer);
-            const box = { x: 28, y: 14, w: 100, h: 100 };
-            const scale = Math.min(box.w / photo.width, box.h / photo.height);
-            const w = photo.width * scale;
-            const h = photo.height * scale;
+            const box = { x: 40.5, y: 26.5, w: 75, h: 75 };
+            const orientation = getJpegExifOrientation(photoBuffer);
+            const angle = { 3: 180, 6: -90, 8: 90 }[orientation] || 0;
+            const swap = angle === 90 || angle === -90;
+            const dispW = swap ? photo.height : photo.width;
+            const dispH = swap ? photo.width : photo.height;
+            const scale = Math.min(box.w / dispW, box.h / dispH);
+            const iw = photo.width * scale;
+            const ih = photo.height * scale;
+            const cx = box.x + box.w / 2;
+            const cy = fromTop(box.y + box.h / 2);
+            const rad = (angle * Math.PI) / 180;
             frontPage.drawImage(photo, {
-                x: box.x + (box.w - w) / 2,
-                y: fromTop(box.y + (box.h - h) / 2, h),
-                width: w,
-                height: h,
+                x: cx - ((iw / 2) * Math.cos(rad) - (ih / 2) * Math.sin(rad)),
+                y: cy - ((iw / 2) * Math.sin(rad) + (ih / 2) * Math.cos(rad)),
+                width: iw,
+                height: ih,
+                rotate: degrees(angle),
             });
         } catch (err) {
             console.warn(`⚠️  Photo could not be embedded: ${err.message}`);
