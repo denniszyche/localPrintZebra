@@ -511,7 +511,7 @@ async function generateDuplexTemplatePdf({
     if (photoBuffer) {
         try {
             const photo = await embedImageAuto(out, photoBuffer);
-            const box = { x: 28, y: 14, w: 100, h: 100 };
+            const box = { x: 40.5, y: 26.5, w: 75, h: 75 };
             const scale = Math.min(box.w / photo.width, box.h / photo.height);
             const w = photo.width * scale;
             const h = photo.height * scale;
