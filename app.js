@@ -14,6 +14,11 @@ const {
     StandardFonts,
     rgb,
     degrees,
+    pushGraphicsState,
+    popGraphicsState,
+    rectangle,
+    clip,
+    endPath,
 } = require("pdf-lib");
 
 const app = express();
@@ -550,12 +555,18 @@ async function generateDuplexTemplatePdf({
             const swap = angle === 90 || angle === -90;
             const dispW = swap ? photo.height : photo.width;
             const dispH = swap ? photo.width : photo.height;
-            const scale = Math.min(box.w / dispW, box.h / dispH);
+            const scale = Math.max(box.w / dispW, box.h / dispH);
             const iw = photo.width * scale;
             const ih = photo.height * scale;
             const cx = box.x + box.w / 2;
-            const cy = fromTop(box.y + box.h / 2);
+            const cy = fromTop(box.y + (dispH * scale) / 2);
             const rad = (angle * Math.PI) / 180;
+            frontPage.pushOperators(
+                pushGraphicsState(),
+                rectangle(box.x, fromTop(box.y, box.h), box.w, box.h),
+                clip(),
+                endPath(),
+            );
             frontPage.drawImage(photo, {
                 x: cx - ((iw / 2) * Math.cos(rad) - (ih / 2) * Math.sin(rad)),
                 y: cy - ((iw / 2) * Math.sin(rad) + (ih / 2) * Math.cos(rad)),
@@ -563,6 +574,7 @@ async function generateDuplexTemplatePdf({
                 height: ih,
                 rotate: degrees(angle),
             });
+            frontPage.pushOperators(popGraphicsState());
         } catch (err) {
             console.warn(`⚠️  Photo could not be embedded: ${err.message}`);
         }
