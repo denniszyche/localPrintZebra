@@ -352,7 +352,13 @@ function resolveFrontTemplatePath(type) {
             `⚠️  Template for type "${type}" not found (${candidate1}), falling back to front.pdf`,
         );
     }
-    return path.join(TEMPLATE_DIR, "front.pdf");
+    const fallback = path.join(TEMPLATE_DIR, "front.pdf");
+    if (!fs.existsSync(fallback)) {
+        throw new Error(
+            `No front template for card type "${type || ""}". Send "type" in the /print request (e.g. adultos, familiar, jovenes, ninas-y-ninos).`,
+        );
+    }
+    return fallback;
 }
 
 /**
@@ -488,7 +494,7 @@ async function generateDuplexTemplatePdf({
 
     if (includeBack) {
         const backDoc = await PDFLibDocument.load(
-            fs.readFileSync(path.join(TEMPLATE_DIR, "back.pdf")),
+            fs.readFileSync(resolveBackTemplatePath(templateType)),
         );
         const [backPage] = await out.copyPages(backDoc, [0]);
         out.addPage(backPage);
