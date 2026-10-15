@@ -582,15 +582,68 @@ async function generateDuplexTemplatePdf({
 
     // 1. userName where the card number was (centered, bold)
     // If no userName is provided, fall back to safeNumber
-    const displayText = safeName || safeNumber;
-    const nameFontSize = 12;
-    const nameWidth = boldFont.widthOfTextAtSize(displayText, nameFontSize);
-    frontPage.drawText(displayText, {
-        x: (width - nameWidth) / 2,
-        y: fromTop(128),
-        size: nameFontSize,
-        font: boldFont,
-        color: black,
+    const displayText = (safeName || safeNumber).replace(/\s+/g, " ");
+    const maxNameWidth = width - 24;
+    const preferredNameFontSize = 12;
+    let nameLines = [displayText];
+
+    if (
+        boldFont.widthOfTextAtSize(displayText, preferredNameFontSize) >
+        maxNameWidth
+    ) {
+        const words = displayText.split(" ");
+        let bestLines = null;
+        let bestWidth = Infinity;
+
+        for (let splitAt = 1; splitAt < words.length; splitAt += 1) {
+            const lines = [
+                words.slice(0, splitAt).join(" "),
+                words.slice(splitAt).join(" "),
+            ];
+            const widestLine = Math.max(
+                ...lines.map((line) =>
+                    boldFont.widthOfTextAtSize(line, preferredNameFontSize),
+                ),
+            );
+            if (widestLine < bestWidth) {
+                bestLines = lines;
+                bestWidth = widestLine;
+            }
+        }
+
+        if (bestLines) {
+            nameLines = bestLines;
+        } else {
+            const middle = Math.ceil(displayText.length / 2);
+            nameLines = [
+                displayText.slice(0, middle),
+                displayText.slice(middle),
+            ];
+        }
+    }
+
+    const widestNameLine = Math.max(
+        ...nameLines.map((line) =>
+            boldFont.widthOfTextAtSize(line, preferredNameFontSize),
+        ),
+    );
+    const nameFontSize =
+        widestNameLine > 0
+            ? Math.min(
+                  preferredNameFontSize,
+                  (maxNameWidth / widestNameLine) * preferredNameFontSize,
+              )
+            : preferredNameFontSize;
+
+    nameLines.forEach((line, index) => {
+        const nameWidth = boldFont.widthOfTextAtSize(line, nameFontSize);
+        frontPage.drawText(line, {
+            x: (width - nameWidth) / 2,
+            y: fromTop(nameLines.length === 1 ? 128 : 115 + index * 13),
+            size: nameFontSize,
+            font: boldFont,
+            color: black,
+        });
     });
 
     // 2. Barcode
